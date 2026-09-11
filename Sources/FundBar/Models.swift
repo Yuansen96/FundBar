@@ -108,6 +108,40 @@ struct Holding: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - 涨跌提醒
+
+struct FundAlertCandidate: Equatable {
+    let code: String
+    let name: String
+    let percent: Double
+}
+
+enum FundAlert {
+    /// 当日涨跌幅越过阈值(绝对值)、且今天尚未提醒过的持仓基金
+    static func candidates(
+        holdings: [Holding],
+        quotes: [String: FundDetail],
+        threshold: Double,
+        notifiedKeys: Set<String>,
+        today: String
+    ) -> [FundAlertCandidate] {
+        guard threshold > 0 else { return [] }
+        var result: [FundAlertCandidate] = []
+        for holding in holdings {
+            guard let percent = quotes[holding.code]?.dayChangePercent else { continue }
+            guard abs(percent) >= threshold else { continue }
+            let key = notifiedKey(code: holding.code, date: today)
+            guard !notifiedKeys.contains(key) else { continue }
+            result.append(FundAlertCandidate(code: holding.code, name: holding.name, percent: percent))
+        }
+        return result
+    }
+
+    static func notifiedKey(code: String, date: String) -> String {
+        "fundbar.alert.\(date).\(code)"
+    }
+}
+
 // MARK: - 设置键
 
 enum SettingsKey {
@@ -119,4 +153,10 @@ enum SettingsKey {
     static let refreshInterval = "fundbar.refresh.interval"
     /// 持仓持久化
     static let holdings = "fundbar.holdings.v1"
+    /// 涨跌提醒开关
+    static let alertEnabled = "fundbar.alert.enabled"
+    /// 提醒阈值(正数百分比,如 2.0 表示 ±2%)
+    static let alertThreshold = "fundbar.alert.threshold"
+    /// 已发送提醒的 key 列表(防重复)
+    static let alertNotified = "fundbar.alert.notified"
 }

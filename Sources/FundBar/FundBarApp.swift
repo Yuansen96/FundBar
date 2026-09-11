@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 菜单栏小工具:不出现在 Dock 和程序切换器
         NSApplication.shared.setActivationPolicy(.accessory)
+        NotificationManager.shared.installPresentationDelegate()
     }
 }
 

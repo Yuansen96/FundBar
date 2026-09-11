@@ -104,11 +104,37 @@ enum TestRun {
         )
     }
 
+    static func alertTests() {
+        print("涨跌提醒:")
+        let holdings = [
+            Holding(code: "161725", name: "招商中证白酒A", amount: 10000, cost: nil),
+            Holding(code: "000217", name: "华安黄金C", amount: 36000, cost: nil),
+        ]
+        let quotes = [
+            "161725": FundDetail(code: "161725", name: "招商中证白酒A", unitNav: 0.5337, navDate: "2026-09-11", dayChangePercent: -2.15),
+            "000217": FundDetail(code: "000217", name: "华安黄金C", unitNav: 5.11, navDate: "2026-09-11", dayChangePercent: 0.42),
+        ]
+        let found = FundAlert.candidates(holdings: holdings, quotes: quotes, threshold: 2.0, notifiedKeys: [], today: "2026-09-11")
+        check(found.count == 1 && found.first?.code == "161725", "仅越过阈值的基金进入提醒(-2.15% 越过 ±2%,0.42% 不触发)")
+        let again = FundAlert.candidates(
+            holdings: holdings, quotes: quotes, threshold: 2.0,
+            notifiedKeys: [FundAlert.notifiedKey(code: "161725", date: "2026-09-11")],
+            today: "2026-09-11"
+        )
+        check(again.isEmpty, "当天已提醒过不再重复提醒")
+        let thresholdZero = FundAlert.candidates(holdings: holdings, quotes: quotes, threshold: 0, notifiedKeys: [], today: "2026-09-11")
+        check(thresholdZero.isEmpty, "阈值为 0 不触发任何提醒")
+        let positive = FundAlert.candidates(holdings: holdings, quotes: quotes, threshold: 2.0, notifiedKeys: [], today: "2026-09-12")
+        check(positive.count == 1, "跨天后重新提醒")
+        check(FundAlert.notifiedKey(code: "161725", date: "2026-09-11") == "fundbar.alert.2026-09-11.161725", "去重 key 格式")
+    }
+
     static func runAll() {
         holdingMathTests()
         eastmoneyDecodeTests()
         danjuanDecodeTests()
         indexDefTests()
+        alertTests()
         print("")
         if failureCount == 0 {
             print("全部 \(checkCount) 项检查通过 ✅")

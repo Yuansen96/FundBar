@@ -7,6 +7,8 @@ struct SettingsPage: View {
     @AppStorage(SettingsKey.menuBarMode) private var menuBarMode = "icon"
     @AppStorage(SettingsKey.menuBarCodes) private var codesRaw = "1.000001"
     @AppStorage(SettingsKey.refreshInterval) private var refreshInterval = 60.0
+    @AppStorage(SettingsKey.alertEnabled) private var alertEnabled = false
+    @AppStorage(SettingsKey.alertThreshold) private var alertThreshold = 2.0
     @ObservedObject private var store = MarketStore.shared
 
     var body: some View {
@@ -64,11 +66,37 @@ struct SettingsPage: View {
                     }
 
                     GroupBox {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("涨跌提醒通知", isOn: $alertEnabled)
+                                .onChange(of: alertEnabled) {
+                                    if alertEnabled {
+                                        NotificationManager.shared.requestAuthorization()
+                                        // 把当前档位落盘,避免未交互过时阈值读取为 0
+                                        UserDefaults.standard.set(alertThreshold, forKey: SettingsKey.alertThreshold)
+                                    }
+                                }
+                            if alertEnabled {
+                                Picker("提醒阈值", selection: $alertThreshold) {
+                                    Text("±1%").tag(1.0)
+                                    Text("±2%").tag(2.0)
+                                    Text("±3%").tag(3.0)
+                                    Text("±5%").tag(5.0)
+                                }
+                                Text("持仓基金当日涨跌幅越过阈值时发送系统通知,每只基金每天最多提醒一次。")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(4)
+                    }
+
+                    GroupBox {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("关于 FundBar")
                                 .font(.callout)
                                 .fontWeight(.medium)
-                            Text("版本 0.1.0 · SwiftUI 原生 macOS 菜单栏基金行情工具")
+                            Text("版本 0.2.0 · SwiftUI 原生 macOS 菜单栏基金行情工具")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text("数据来源:东方财富、蛋卷基金公开接口(非官方,无可用性保证)。本项目仅供学习交流,不构成任何投资建议。")

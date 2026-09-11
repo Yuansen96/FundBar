@@ -62,6 +62,7 @@ final class MarketStore: ObservableObject {
             errorMessage = nil
             hasLoadedOnce = true
             await refreshFundQuotes()
+            checkAlerts()
         } catch {
             errorMessage = "行情获取失败:\(error.localizedDescription)"
         }
@@ -98,6 +99,32 @@ final class MarketStore: ObservableObject {
             updated[holding.code] = detail
         }
         fundQuotes = updated
+    }
+
+    // MARK: - 涨跌提醒
+
+    /// 每次行情刷新后检查持仓是否越过提醒阈值,发系统通知;每只基金每天最多一次
+    private func checkAlerts() {
+        guard UserDefaults.standard.bool(forKey: SettingsKey.alertEnabled) else { return }
+        var threshold = UserDefaults.standard.double(forKey: SettingsKey.alertThreshold)
+        if threshold <= 0 { threshold = 2.0 }
+        let today = NotificationManager.todayString()
+        var notified = Set(UserDefaults.standard.stringArray(forKey: SettingsKey.alertNotified) ?? [])
+        let found = FundAlert.candidates(
+            holdings: holdings,
+            quotes: fundQuotes,
+            threshold: threshold,
+            notifiedKeys: notified,
+            today: today
+        )
+        guard !found.isEmpty else { return }
+        for candidate in found {
+            NotificationManager.shared.sendFundAlert(candidate, date: today)
+            notified.insert(FundAlert.notifiedKey(code: candidate.code, date: today))
+        }
+        // 只保留今天的记录,防止列表无限增长
+        let pruned = Array(notified).filter { $0.hasPrefix("fundbar.alert.\(today).") }
+        UserDefaults.standard.set(pruned, forKey: SettingsKey.alertNotified)
     }
 
     // MARK: - 持仓管理
