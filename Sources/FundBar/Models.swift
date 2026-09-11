@@ -1,0 +1,122 @@
+import Foundation
+
+// MARK: - 指数定义
+
+enum IndexRegion: String, CaseIterable, Identifiable {
+    case cn = "A股"
+    case asia = "亚太"
+    case us = "美股"
+
+    var id: String { rawValue }
+}
+
+struct IndexDef: Identifiable, Hashable {
+    let name: String
+    /// 菜单栏摘要用的短名
+    let shortName: String
+    /// 东方财富 secid,如 "1.000001"
+    let secid: String
+    let region: IndexRegion
+
+    var id: String { secid }
+    var codePart: String { secid.split(separator: ".").last.map(String.init) ?? secid }
+}
+
+extension IndexDef {
+    /// 全部可订阅指数(均为东财免费接口已实测可用的 secid)
+    static let all: [IndexDef] = [
+        IndexDef(name: "上证指数", shortName: "上证", secid: "1.000001", region: .cn),
+        IndexDef(name: "深证成指", shortName: "深成", secid: "0.399001", region: .cn),
+        IndexDef(name: "创业板指", shortName: "创业板", secid: "0.399006", region: .cn),
+        IndexDef(name: "恒生指数", shortName: "恒生", secid: "100.HSI", region: .asia),
+        IndexDef(name: "日经225", shortName: "日经", secid: "100.N225", region: .asia),
+        IndexDef(name: "韩国KOSPI", shortName: "KOSPI", secid: "100.KS11", region: .asia),
+        IndexDef(name: "道琼斯", shortName: "道指", secid: "100.DJIA", region: .us),
+        IndexDef(name: "纳斯达克", shortName: "纳指", secid: "100.NDX", region: .us),
+        IndexDef(name: "标普500", shortName: "标普", secid: "100.SPX", region: .us),
+    ]
+}
+
+// MARK: - 行情模型
+
+struct IndexQuote: Identifiable {
+    let def: IndexDef
+    let price: Double?
+    let change: Double?
+    let changePercent: Double?
+
+    var id: String { def.secid }
+}
+
+struct SectorQuote: Identifiable, Hashable {
+    let name: String
+    let code: String
+    let changePercent: Double?
+
+    var id: String { code }
+}
+
+struct FundDetail: Equatable {
+    let code: String
+    let name: String
+    let unitNav: Double?
+    let navDate: String?
+    let dayChangePercent: Double?
+}
+
+struct NavPoint: Identifiable, Equatable {
+    let date: String
+    let nav: Double
+    let changePercent: Double?
+
+    var id: String { date }
+}
+
+// MARK: - 持仓
+
+struct Holding: Identifiable, Codable, Hashable {
+    var code: String
+    var name: String
+    /// 持有金额(昨日收盘市值口径)
+    var amount: Double
+    /// 成本金额,选填;填写后才能计算持有收益
+    var cost: Double?
+
+    var id: String { code }
+
+    /// 当日盈亏 = 持有金额 × 当日涨跌幅
+    static func dayPnl(amount: Double, dayPercent: Double) -> Double {
+        amount * dayPercent / 100
+    }
+
+    /// 当前市值 = 持有金额 × (1 + 当日涨跌幅)
+    static func marketValue(amount: Double, dayPercent: Double) -> Double {
+        amount * (1 + dayPercent / 100)
+    }
+
+    /// 持有收益 = 当前市值 - 成本;未填成本时为 nil
+    static func totalPnl(amount: Double, dayPercent: Double, cost: Double?) -> Double? {
+        guard let cost, cost > 0 else { return nil }
+        return marketValue(amount: amount, dayPercent: dayPercent) - cost
+    }
+
+    /// 持有收益率(%)
+    static func totalPnlPercent(amount: Double, dayPercent: Double, cost: Double?) -> Double? {
+        guard let cost, cost > 0 else { return nil }
+        guard let pnl = totalPnl(amount: amount, dayPercent: dayPercent, cost: cost) else { return nil }
+        return pnl / cost * 100
+    }
+}
+
+// MARK: - 设置键
+
+enum SettingsKey {
+    /// 菜单栏显示模式:"icon"(仅图标) | "iconText"(图标 + 涨跌摘要)
+    static let menuBarMode = "fundbar.menubar.mode"
+    /// 菜单栏摘要展示的指数 secid,逗号分隔,最多 3 个
+    static let menuBarCodes = "fundbar.menubar.codes"
+    /// 行情刷新间隔(秒)
+    static let refreshInterval = "fundbar.refresh.interval"
+    /// 持仓持久化
+    static let holdings = "fundbar.holdings.v1"
+}
