@@ -12,7 +12,12 @@ final class MarketStore: ObservableObject {
     @Published private(set) var fundQuotes: [String: FundDetail] = [:]
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var isLoading = false
+    /// 致命错误:所有数据源都失败
     @Published private(set) var errorMessage: String?
+    /// 降级提示:东财不可达已切换腾讯源(黄色状态)
+    @Published private(set) var dataSourceNote: String?
+    /// 板块榜单独失败(指数仍正常)
+    @Published private(set) var sectorError: String?
 
     @Published var holdings: [Holding] = MarketStore.loadHoldings() {
         didSet { saveHoldings() }
@@ -50,34 +55,54 @@ final class MarketStore: ObservableObject {
     func refresh(showLoading: Bool) async {
         if showLoading { isLoading = true }
         defer { if showLoading { isLoading = false } }
+
+        // 指数:东财 -> 腾讯 降级链
+        var indices: [IndexQuote]?
         do {
-            async let indicesTask = fetchIndices()
+            let result = try await fetchIndicesWithFallback()
+            indices = result.quotes
+            dataSourceNote = result.usedFallback ? "东财行情不可达,已切换腾讯备用源(日经/KOSPI 暂缺)" : nil
+        } catch {
+            dataSourceNote = nil
+            errorMessage = "行情获取失败:\(friendlyNetworkMessage(error))"
+        }
+
+        // 板块榜:仅东财,失败不阻塞指数展示
+        do {
             async let gainersTask = EastmoneyAPI.shared.fetchSectorRank(ascending: false, count: 8)
             async let losersTask = EastmoneyAPI.shared.fetchSectorRank(ascending: true, count: 8)
-            let (indices, gainers, losers) = try await (indicesTask, gainersTask, losersTask)
-            indexQuotes = indices
+            let (gainers, losers) = try await (gainersTask, losersTask)
             sectorGainers = gainers
             sectorLosers = losers
+            sectorError = nil
+        } catch {
+            sectorGainers = []
+            sectorLosers = []
+            sectorError = dataSourceNote == nil ? "板块榜暂不可用:\(friendlyNetworkMessage(error))" : nil
+        }
+
+        if let indices {
+            indexQuotes = indices
             lastUpdated = Date()
             errorMessage = nil
             hasLoadedOnce = true
             await refreshFundQuotes()
             checkAlerts()
-        } catch {
-            errorMessage = "行情获取失败:\(error.localizedDescription)"
         }
     }
 
-    /// 某只基金的当日涨跌幅(用于持仓盈亏计算)
-    func dayPercent(for code: String) -> Double? {
-        fundQuotes[code]?.dayChangePercent
+    /// 指数降级链:东财优先,失败(-1005 等,常见于 IPv6 异常网络)切腾讯源
+    private func fetchIndicesWithFallback() async throws -> (quotes: [IndexQuote], usedFallback: Bool) {
+        do {
+            let quotes = try await fetchIndicesFromEastmoney()
+            return (quotes, false)
+        } catch {
+            let quotes = try await fetchIndicesFromTencent()
+            return (quotes, true)
+        }
     }
 
-    func fundDetail(for code: String) -> FundDetail? {
-        fundQuotes[code]
-    }
-
-    private func fetchIndices() async throws -> [IndexQuote] {
+    private func fetchIndicesFromEastmoney() async throws -> [IndexQuote] {
         let defs = IndexDef.all
         let quotes = try await EastmoneyAPI.shared.fetchQuotes(secids: defs.map(\.secid))
         return defs.map { def in
@@ -89,6 +114,33 @@ final class MarketStore: ObservableObject {
                 changePercent: quote?.changePercent
             )
         }
+    }
+
+    private func fetchIndicesFromTencent() async throws -> [IndexQuote] {
+        let defs = IndexDef.all
+        let supported = defs.filter { $0.tencentCode != nil }
+        let tencentQuotes = try await TencentAPI.shared.fetchQuotes(codes: supported.compactMap(\.tencentCode))
+        return defs.map { def in
+            guard let code = def.tencentCode, let quote = tencentQuotes[code] else {
+                // 腾讯源不支持(日经225/韩国KOSPI),置空由 UI 显示"暂不可用"
+                return IndexQuote(def: def, price: nil, change: nil, changePercent: nil)
+            }
+            return IndexQuote(
+                def: def,
+                price: quote.price,
+                change: quote.change,
+                changePercent: quote.changePercent
+            )
+        }
+    }
+
+    /// 某只基金的当日涨跌幅(用于持仓盈亏计算)
+    func dayPercent(for code: String) -> Double? {
+        fundQuotes[code]?.dayChangePercent
+    }
+
+    func fundDetail(for code: String) -> FundDetail? {
+        fundQuotes[code]
     }
 
     /// 拉取所有持仓基金的当日净值与涨跌幅

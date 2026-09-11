@@ -16,6 +16,8 @@ struct IndexDef: Identifiable, Hashable {
     let shortName: String
     /// 东方财富 secid,如 "1.000001"
     let secid: String
+    /// 腾讯行情源代码,如 "sh000001";nil 表示腾讯源不支持该指数
+    let tencentCode: String?
     let region: IndexRegion
 
     var id: String { secid }
@@ -23,17 +25,17 @@ struct IndexDef: Identifiable, Hashable {
 }
 
 extension IndexDef {
-    /// 全部可订阅指数(均为东财免费接口已实测可用的 secid)
+    /// 全部可订阅指数(东财 secid 为主源,腾讯代码为降级源;均已实测)
     static let all: [IndexDef] = [
-        IndexDef(name: "上证指数", shortName: "上证", secid: "1.000001", region: .cn),
-        IndexDef(name: "深证成指", shortName: "深成", secid: "0.399001", region: .cn),
-        IndexDef(name: "创业板指", shortName: "创业板", secid: "0.399006", region: .cn),
-        IndexDef(name: "恒生指数", shortName: "恒生", secid: "100.HSI", region: .asia),
-        IndexDef(name: "日经225", shortName: "日经", secid: "100.N225", region: .asia),
-        IndexDef(name: "韩国KOSPI", shortName: "KOSPI", secid: "100.KS11", region: .asia),
-        IndexDef(name: "道琼斯", shortName: "道指", secid: "100.DJIA", region: .us),
-        IndexDef(name: "纳斯达克", shortName: "纳指", secid: "100.NDX", region: .us),
-        IndexDef(name: "标普500", shortName: "标普", secid: "100.SPX", region: .us),
+        IndexDef(name: "上证指数", shortName: "上证", secid: "1.000001", tencentCode: "sh000001", region: .cn),
+        IndexDef(name: "深证成指", shortName: "深成", secid: "0.399001", tencentCode: "sz399001", region: .cn),
+        IndexDef(name: "创业板指", shortName: "创业板", secid: "0.399006", tencentCode: "sz399006", region: .cn),
+        IndexDef(name: "恒生指数", shortName: "恒生", secid: "100.HSI", tencentCode: "hkHSI", region: .asia),
+        IndexDef(name: "日经225", shortName: "日经", secid: "100.N225", tencentCode: nil, region: .asia),
+        IndexDef(name: "韩国KOSPI", shortName: "KOSPI", secid: "100.KS11", tencentCode: nil, region: .asia),
+        IndexDef(name: "道琼斯", shortName: "道指", secid: "100.DJIA", tencentCode: "usDJI", region: .us),
+        IndexDef(name: "纳斯达克", shortName: "纳指", secid: "100.NDX", tencentCode: "usIXIC", region: .us),
+        IndexDef(name: "标普500", shortName: "标普", secid: "100.SPX", tencentCode: "usINX", region: .us),
     ]
 }
 

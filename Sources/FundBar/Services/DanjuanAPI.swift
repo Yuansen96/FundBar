@@ -5,13 +5,6 @@ import Foundation
 struct DanjuanAPI {
     static let shared = DanjuanAPI()
 
-    private let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        return URLSession(configuration: config)
-    }()
-
     /// 蛋卷的净值/涨跌幅字段是字符串,兼容极端情况下的数字
     enum FlexibleString: Decodable {
         case string(String)
@@ -61,18 +54,7 @@ struct DanjuanAPI {
     }
 
     private func get(_ urlString: String) async throws -> Data {
-        guard let url = URL(string: urlString) else { throw APIError.invalidURL }
-        var request = URLRequest(url: url)
-        request.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            forHTTPHeaderField: "User-Agent"
-        )
-        request.setValue("https://danjuanfunds.com/", forHTTPHeaderField: "Referer")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw APIError.badStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
-        }
-        return data
+        try await HTTPClient.shared.get(urlString, referer: "https://danjuanfunds.com/")
     }
 
     /// 基金详情:名称、最新净值、当日涨跌幅

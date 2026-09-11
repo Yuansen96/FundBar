@@ -3,11 +3,13 @@ import Foundation
 enum APIError: LocalizedError {
     case badStatus(Int)
     case invalidURL
+    case badResponse
 
     var errorDescription: String? {
         switch self {
         case .badStatus(let code): return "HTTP \(code)"
         case .invalidURL: return "接口地址无效"
+        case .badResponse: return "响应格式异常"
         }
     }
 }
@@ -16,13 +18,6 @@ enum APIError: LocalizedError {
 /// 指数 ulist、行业板块 clist 均无需鉴权;字段含义见 README「数据来源」。
 struct EastmoneyAPI {
     static let shared = EastmoneyAPI()
-
-    private let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        return URLSession(configuration: config)
-    }()
 
     /// fltt=2 时 f2/f3/f4 通常是数字,休市时段可能返回 "-",需要兼容
     enum FlexibleNumber: Decodable {
@@ -63,18 +58,7 @@ struct EastmoneyAPI {
     }
 
     private func get(_ urlString: String, referer: String) async throws -> Data {
-        guard let url = URL(string: urlString) else { throw APIError.invalidURL }
-        var request = URLRequest(url: url)
-        request.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            forHTTPHeaderField: "User-Agent"
-        )
-        request.setValue(referer, forHTTPHeaderField: "Referer")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw APIError.badStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
-        }
-        return data
+        try await HTTPClient.shared.get(urlString, referer: referer)
     }
 
     /// 批量拉取指数行情。返回以「secid 尾段代码」和「指数名称」两种 key 的映射,

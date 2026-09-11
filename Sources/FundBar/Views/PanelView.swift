@@ -1,11 +1,12 @@
 import SwiftUI
 
 /// 点开菜单栏图标后的主面板:大盘 / 板块 / 我的基金 三个页签,
-/// 右上角齿轮进入设置;添加基金和基金详情以子页面方式呈现。
+/// 毛玻璃材质背景;添加/编辑基金和详情以子页面方式呈现。
 struct PanelView: View {
     private enum Page: Equatable {
         case tabs
         case addFund
+        case editFund(Holding)
         case settings
         case detail(String)
     }
@@ -19,14 +20,17 @@ struct PanelView: View {
             case .tabs:
                 tabsContent
             case .addFund:
-                AddFundPage { page = .tabs; tab = 2 }
+                AddFundPage(editing: nil) { page = .tabs; tab = 2 }
+            case .editFund(let holding):
+                AddFundPage(editing: holding) { page = .tabs; tab = 2 }
             case .settings:
                 SettingsPage { page = .tabs }
             case .detail(let code):
                 FundDetailPage(code: code) { page = .tabs; tab = 2 }
             }
         }
-        .frame(width: 440)
+        .frame(width: 460)
+        .background(.regularMaterial)
         .task { await MarketStore.shared.refreshIfNeeded() }
     }
 
@@ -35,8 +39,14 @@ struct PanelView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Text("FundBar")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [CnStyle.up, CnStyle.down],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
                 Picker("", selection: $tab) {
                     Text("大盘").tag(0)
                     Text("板块").tag(1)
@@ -68,11 +78,13 @@ struct PanelView: View {
                 default:
                     FundTabView(
                         onAdd: { page = .addFund },
+                        onEdit: { holding in page = .editFund(holding) },
                         onOpenDetail: { code in page = .detail(code) }
                     )
                 }
             }
-            .frame(minHeight: 420, maxHeight: 540)
+            .frame(minHeight: 430, maxHeight: 560)
+            .animation(.easeInOut(duration: 0.16), value: tab)
 
             Divider()
             MarketFooterView()
@@ -80,26 +92,38 @@ struct PanelView: View {
     }
 }
 
-/// 面板底部:错误信息 / 最后更新时间 / 手动刷新
+/// 面板底部:状态点 + 三态信息(错误 / 降级 / 正常)+ 手动刷新
 struct MarketFooterView: View {
     @ObservedObject private var store = MarketStore.shared
 
+    private var dotColor: Color {
+        if store.errorMessage != nil { return .red }
+        if store.dataSourceNote != nil { return .yellow }
+        return store.lastUpdated != nil ? .green : .gray
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(dotColor)
+                .frame(width: 6, height: 6)
             if let error = store.errorMessage {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
                 Text(error)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.red)
                     .lineLimit(1)
+            } else if let note = store.dataSourceNote {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+                    .help(note)
             } else if let date = store.lastUpdated {
-                Text("更新于 \(date.formatted(.dateTime.hour().minute().second()))")
+                Text("已连接 · 更新于 \(date.formatted(.dateTime.hour().minute().second()))")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             } else {
-                Text("尚未加载")
+                Text("尚未连接")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

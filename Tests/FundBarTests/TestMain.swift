@@ -99,9 +99,34 @@ enum TestRun {
         check(secids.contains("100.KS11"), "韩国KOSPI")
         check(secids.contains("100.NDX"), "纳斯达克(注意代码是 NDX 不是 IXIC)")
         check(
-            IndexDef(name: "", shortName: "", secid: "1.000001", region: .cn).codePart == "000001",
+            IndexDef(name: "", shortName: "", secid: "1.000001", tencentCode: "sh000001", region: .cn).codePart == "000001",
             "codePart 提取尾段代码"
         )
+        // 降级源覆盖:除日经/KOSPI 外均有腾讯代码
+        let withTencent = IndexDef.all.compactMap(\.tencentCode)
+        check(withTencent.count == 7, "腾讯备用源覆盖 7/9 指数(日经/KOSPI 无免费替代)")
+        check(!withTencent.contains(where: { $0.hasPrefix("jp") || $0.hasPrefix("kr") }), "日经/KOSPI 不在腾讯源内")
+    }
+
+    // MARK: - 腾讯降级源解析(样本来自 2026-09-11 实测)
+
+    static func tencentParseTests() {
+        print("腾讯行情解析:")
+        let sample = """
+        v_pv_none_match="1";
+        v_sh000001="1~上证指数~000001~3888.11~3934.40~3910.92~579123145~0~0~0.00~0~0.00~0~0.00~0~0.00~0~0.00~0~0.00~0~0.00~0~0.00~0~20260911161403~-46.29~-1.18~3812.32~3934.40~1~.jpg";
+        v_usDJI="200~道琼斯~.DJI~52573.29~52064.10~52204.46~354468410~0~0~52442.83~0~0~0~0~0~0~0~0~0~52671.60~0~0~0~0~0~0~0~0~0~~2026-09-11";
+        """
+        let parsed = TencentAPI.parse(sample)
+        check(parsed.count == 2, "有效行解析(跳过 none_match)")
+        let sh = parsed["sh000001"]
+        check(sh?.name == "上证指数", "名称字段")
+        checkEqual(sh?.price ?? 0, 3888.11, accuracy: 0.001, "现价")
+        checkEqual(sh?.change ?? 0, -46.29, accuracy: 0.01, "涨跌额(现价-昨收)")
+        checkEqual(sh?.changePercent ?? 0, -1.1766, accuracy: 0.001, "涨跌幅推算")
+        let dji = parsed["usDJI"]
+        checkEqual(dji?.price ?? 0, 52573.29, accuracy: 0.001, "美股现价")
+        check(dji?.name == "道琼斯", "美股名称")
     }
 
     static func alertTests() {
@@ -134,6 +159,7 @@ enum TestRun {
         eastmoneyDecodeTests()
         danjuanDecodeTests()
         indexDefTests()
+        tencentParseTests()
         alertTests()
         print("")
         if failureCount == 0 {
