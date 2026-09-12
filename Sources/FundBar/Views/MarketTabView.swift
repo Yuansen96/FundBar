@@ -3,6 +3,7 @@ import SwiftUI
 /// 大盘页签:按 A股 / 亚太 / 美股 分组展示 9 个指数,卡片化行 + 渐变涨跌胶囊
 struct MarketTabView: View {
     @ObservedObject private var store = MarketStore.shared
+    @State private var pulse = false
 
     private static let regionFlags: [IndexRegion: String] = [
         .cn: "🇨🇳", .asia: "🌏", .us: "🇺🇸",
@@ -15,7 +16,13 @@ struct MarketTabView: View {
                     closedNoticeBar(notice)
                 }
                 if store.indexQuotes.isEmpty {
-                    emptyState
+                    if store.isLoading {
+                        ForEach(0..<9, id: \.self) { _ in
+                            skeletonRow
+                        }
+                    } else {
+                        errorState
+                    }
                 }
                 ForEach(IndexRegion.allCases) { region in
                     let quotes = store.indexQuotes.filter { $0.def.region == region }
@@ -52,18 +59,40 @@ struct MarketTabView: View {
         .padding(.bottom, 4)
     }
 
-    private var emptyState: some View {
+    /// 加载骨架屏(呼吸脉动)
+    private var skeletonRow: some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 3, height: 26)
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 70, height: 12)
+            Spacer()
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 52, height: 12)
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 56, height: 12)
+            RoundedRectangle(cornerRadius: 9)
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 60, height: 19)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .opacity(pulse ? 0.45 : 0.9)
+        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
+    }
+
+    private var errorState: some View {
         VStack(spacing: 8) {
-            if store.isLoading {
-                ProgressView()
-            } else {
-                Image(systemName: "wifi.exclamationmark")
-                    .font(.system(size: 26))
-                    .foregroundStyle(.tertiary)
-                Text(store.errorMessage ?? "暂无数据,点击下方刷新")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 26))
+                .foregroundStyle(.tertiary)
+            Text(store.errorMessage ?? "暂无数据,点击下方刷新")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, minHeight: 260)
     }

@@ -16,8 +16,13 @@ swift build -c release
 BINARY=".build/arm64-apple-macosx/release/$APP_NAME"
 
 rm -rf "$APP_DIR"
-mkdir -p "$APP_DIR/Contents/MacOS"
+mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BINARY" "$APP_DIR/Contents/MacOS/$APP_NAME"
+
+# 生成应用图标(纯 AppKit 离屏渲染,无外部依赖)
+if swiftc -O Scripts/make-icon.swift -o .build/make-icon 2>/dev/null; then
+    .build/make-icon "$APP_DIR/Contents/Resources/AppIcon.png"
+fi
 
 cat > "$APP_DIR/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -28,11 +33,12 @@ cat > "$APP_DIR/Contents/Info.plist" <<'EOF'
     <key>CFBundleIdentifier</key><string>com.gaochenjie.fundbar</string>
     <key>CFBundleName</key><string>FundBar</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.6.0</string>
+    <key>CFBundleShortVersionString</key><string>0.6.1</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
 </dict>
 </plist>
 EOF

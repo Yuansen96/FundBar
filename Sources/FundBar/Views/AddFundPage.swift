@@ -51,27 +51,11 @@ struct AddFundPage: View {
                     .disabled(searchInput.trimmingCharacters(in: .whitespaces).isEmpty || isSearching)
                 }
                 ForEach(searchResults) { hit in
-                    Button {
+                    FundSearchRow(hit: hit) {
                         codeInput = hit.code
                         searchResults = []
                         fetchDetail()
-                    } label: {
-                        HStack {
-                            Text(hit.name)
-                                .font(.system(size: 12.5))
-                                .lineLimit(1)
-                            Spacer()
-                            Text(hit.code)
-                                .font(.system(size: 11).monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
-                        .contentShape(Rectangle())
-                        .padding(.vertical, 5)
-                        .padding(.horizontal, 6)
-                        .background(Color.primary.opacity(0.03))
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
                     }
-                    .buttonStyle(.plain)
                 }
                 if isSearching {
                     ProgressView()
@@ -197,5 +181,36 @@ struct AddFundPage: View {
             Holding(code: detail.code, name: detail.name, amount: amount, cost: parsedCost)
         )
         onDone()
+    }
+}
+
+/// 搜索结果行(悬停高亮)
+struct FundSearchRow: View {
+    let hit: EastmoneyFundAPI.SearchHit
+    let onSelect: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack {
+                Text(hit.name)
+                    .font(.system(size: 12.5))
+                    .lineLimit(1)
+                Spacer()
+                Text(hit.code)
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 5)
+            .padding(.horizontal, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color.primary.opacity(hovered ? 0.08 : 0.03))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovered)
     }
 }

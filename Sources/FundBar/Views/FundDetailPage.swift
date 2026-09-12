@@ -49,6 +49,9 @@ struct FundDetailPage: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 280)
             } else {
+                if let detail {
+                    heroHeader(detail)
+                }
                 statsSection
                 stageReturnsSection
                 rangePicker
@@ -82,6 +85,36 @@ struct FundDetailPage: View {
         store.holdings.first { $0.code == code }
     }
 
+    /// Hero 区:大号净值 + 当日涨跌胶囊
+    private func heroHeader(_ detail: FundDetail) -> some View {
+        let color = CnStyle.color(for: detail.dayChangePercent)
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(detail.unitNav?.priceText ?? "--")
+                .font(.system(size: 26, weight: .heavy, design: .rounded).monospacedDigit())
+                .contentTransition(.numericText())
+            Text("净值 · \(detail.navDate ?? "--")")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(detail.dayChangePercent?.percentText ?? "--")
+                .font(.system(size: 14, weight: .bold).monospacedDigit())
+                .foregroundStyle(.white)
+                .contentTransition(.numericText())
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule().fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.9), color.opacity(0.7)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                )
+        }
+        .padding(.bottom, 2)
+    }
+
     private var statsSection: some View {
         let dayPercent = detail?.dayChangePercent
         let dayPnl = holding.map { Holding.dayPnl(amount: $0.amount, dayPercent: dayPercent ?? 0) }
@@ -92,13 +125,7 @@ struct FundDetailPage: View {
             Holding.totalPnlPercent(amount: $0.amount, dayPercent: dayPercent ?? 0, cost: $0.cost)
         }
 
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-            statCard(
-                title: "最新净值\(detail?.navDate.map { " · \($0)" } ?? "")",
-                value: detail?.unitNav?.priceText ?? "--",
-                color: .primary
-            )
-            statCard(title: "当日涨跌", value: dayPercent?.percentText ?? "--", color: CnStyle.color(for: dayPercent))
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
             statCard(
                 title: "持有金额",
                 value: holding.map(\.amount.yuanText) ?? "未添加持仓",
