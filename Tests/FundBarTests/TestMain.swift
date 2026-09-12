@@ -129,6 +129,46 @@ enum TestRun {
         check(dji?.name == "道琼斯", "美股名称")
     }
 
+    static func tradingDayTests() {
+        print("交易日推算:")
+        func shanghaiDate(_ year: Int, _ month: Int, _ day: Int) -> Date {
+            var comps = DateComponents()
+            comps.year = year; comps.month = month; comps.day = day; comps.hour = 12
+            var cal = Calendar(identifier: .gregorian)
+            cal.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+            return cal.date(from: comps)!
+        }
+        // 2026-09-12 周六、09-13 周日、09-11 周五、09-09 周三
+        let saturday = shanghaiDate(2026, 9, 12)
+        let sunday = shanghaiDate(2026, 9, 13)
+        let friday = shanghaiDate(2026, 9, 11)
+        let wednesday = shanghaiDate(2026, 9, 9)
+        check(TradingDay.isWeekend(saturday), "9-12 是周末(周六)")
+        check(!TradingDay.isWeekend(friday), "9-11 是工作日(周五)")
+        check(TradingDay.string(TradingDay.mostRecent(from: saturday)) == "2026-09-11", "周六回退到周五 09-11")
+        check(TradingDay.string(TradingDay.mostRecent(from: sunday)) == "2026-09-11", "周日回退到周五 09-11")
+        check(TradingDay.string(TradingDay.mostRecent(from: wednesday)) == "2026-09-09", "周三保持当天")
+        check(TradingDay.weekdayLabel(friday) == "星期五", "星期标签本地化")
+    }
+
+    static func tencentDateTests() {
+        print("腾讯日期解析:")
+        check(
+            TencentAPI.extractDate("1~上证指数~000001~3888.11~3934.40~0~20260911161403~-46.29~-1.18") == "2026-09-11",
+            "A股 14 位时间戳解析"
+        )
+        check(
+            TencentAPI.extractDate("200~道琼斯~.DJI~52573.29~52064.10~52204.46~~2026-09-11") == "2026-09-11",
+            "美股 yyyy-MM-dd 解析"
+        )
+        check(
+            TencentAPI.extractDate("100~恒生指数~HSI~24805.630~24954.470~22843055.8745~0") == nil,
+            "成交量等大数字不误判为日期"
+        )
+        check(DataSourceMode(rawValue: "tencent") == .tencent, "数据源模式解析")
+        check(DataSourceMode(rawValue: "unknown") == nil, "非法数据源回落 auto")
+    }
+
     static func alertTests() {
         print("涨跌提醒:")
         let holdings = [
@@ -160,6 +200,8 @@ enum TestRun {
         danjuanDecodeTests()
         indexDefTests()
         tencentParseTests()
+        tencentDateTests()
+        tradingDayTests()
         alertTests()
         print("")
         if failureCount == 0 {

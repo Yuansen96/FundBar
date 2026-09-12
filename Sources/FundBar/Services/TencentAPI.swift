@@ -11,6 +11,8 @@ struct TencentAPI {
         let price: Double?
         let change: Double?
         let changePercent: Double?
+        /// 行情日期(yyyy-MM-dd),行内无法解析时为 nil
+        let dataDate: String?
     }
 
     func fetchQuotes(codes: [String]) async throws -> [String: Quote] {
@@ -46,10 +48,24 @@ struct TencentAPI {
                 name: fields.count > 1 ? fields[1] : String(code),
                 price: price,
                 change: change,
-                changePercent: percent
+                changePercent: percent,
+                dataDate: extractDate(content)
             )
         }
         return result
+    }
+
+    /// 从行内容提取行情日期:A股为 14 位时间戳(20260911161403),美股为 "2026-09-11"。
+    /// 14 位正则限定 2020-2039 年开头,避免误匹配成交量等大数字。
+    static func extractDate(_ content: String) -> String? {
+        if let range = content.range(of: #"\d{4}-\d{2}-\d{2}"#, options: .regularExpression) {
+            return String(content[range])
+        }
+        if let range = content.range(of: #"20[2-3]\d{11}"#, options: .regularExpression) {
+            let digits = String(content[range])
+            return "\(digits.prefix(4))-\(digits.dropFirst(4).prefix(2))-\(digits.dropFirst(6).prefix(2))"
+        }
+        return nil
     }
 }
 

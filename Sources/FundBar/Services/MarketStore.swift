@@ -35,6 +35,24 @@ final class MarketStore: ObservableObject {
         return stored > 0 ? stored : 60
     }
 
+    /// 用户在设置中选择的数据源模式
+    var dataSourceMode: DataSourceMode {
+        DataSourceMode(rawValue: UserDefaults.standard.string(forKey: SettingsKey.dataSource) ?? "") ?? .auto
+    }
+
+    /// 设置页切换数据源后调用,立即按新模式刷新
+    func applyDataSourceSetting() {
+        Task { await refresh(showLoading: false) }
+    }
+
+    /// 休市提示:行情数据日期早于今天时返回提示文案
+    var marketClosedNotice: String? {
+        guard let date = indexQuotes.compactMap(\.dataDate).first else { return nil }
+        let today = TradingDay.string(Date())
+        guard date != today, let tradingDay = TradingDay.date(from: date) else { return nil }
+        return "今日休市,展示 \(TradingDay.string(tradingDay).dropFirst(5))(\(TradingDay.weekdayLabel(tradingDay)))收盘行情"
+    }
+
     /// 设置页修改刷新间隔后调用,重建定时器
     func startTimer() {
         timer?.invalidate()
@@ -56,29 +74,40 @@ final class MarketStore: ObservableObject {
         if showLoading { isLoading = true }
         defer { if showLoading { isLoading = false } }
 
-        // 指数:东财 -> 腾讯 降级链
+        // 指数:按数据源设置获取(auto 模式东财 -> 腾讯 降级链)
         var indices: [IndexQuote]?
         do {
             let result = try await fetchIndicesWithFallback()
             indices = result.quotes
-            dataSourceNote = result.usedFallback ? "东财行情不可达,已切换腾讯备用源(日经/KOSPI 暂缺)" : nil
+            switch result.forcedMode ?? .auto {
+            case .tencent:
+                dataSourceNote = "使用腾讯源(日经/KOSPI 暂缺)"
+            case .eastmoney, .auto:
+                dataSourceNote = result.usedFallback ? "东财行情不可达,已切换腾讯备用源(日经/KOSPI 暂缺)" : nil
+            }
         } catch {
             dataSourceNote = nil
             errorMessage = "行情获取失败:\(friendlyNetworkMessage(error))"
         }
 
-        // 板块榜:仅东财,失败不阻塞指数展示
-        do {
-            async let gainersTask = EastmoneyAPI.shared.fetchSectorRank(ascending: false, count: 8)
-            async let losersTask = EastmoneyAPI.shared.fetchSectorRank(ascending: true, count: 8)
-            let (gainers, losers) = try await (gainersTask, losersTask)
-            sectorGainers = gainers
-            sectorLosers = losers
-            sectorError = nil
-        } catch {
+        // 板块榜:仅东财提供,失败/腾讯模式不阻塞指数展示
+        if dataSourceMode == .tencent {
             sectorGainers = []
             sectorLosers = []
-            sectorError = dataSourceNote == nil ? "板块榜暂不可用:\(friendlyNetworkMessage(error))" : nil
+            sectorError = "板块榜仅东财源提供,当前数据源为腾讯"
+        } else {
+            do {
+                async let gainersTask = EastmoneyAPI.shared.fetchSectorRank(ascending: false, count: 8)
+                async let losersTask = EastmoneyAPI.shared.fetchSectorRank(ascending: true, count: 8)
+                let (gainers, losers) = try await (gainersTask, losersTask)
+                sectorGainers = gainers
+                sectorLosers = losers
+                sectorError = dataSourceNote == nil ? nil : "板块榜由东财源提供,当前处于腾讯降级源"
+            } catch {
+                sectorGainers = []
+                sectorLosers = []
+                sectorError = dataSourceNote == nil ? "板块榜暂不可用:\(friendlyNetworkMessage(error))" : nil
+            }
         }
 
         if let indices {
@@ -91,27 +120,34 @@ final class MarketStore: ObservableObject {
         }
     }
 
-    /// 指数降级链:东财优先,失败(-1005 等,常见于 IPv6 异常网络)切腾讯源
-    private func fetchIndicesWithFallback() async throws -> (quotes: [IndexQuote], usedFallback: Bool) {
-        do {
-            let quotes = try await fetchIndicesFromEastmoney()
-            return (quotes, false)
-        } catch {
-            let quotes = try await fetchIndicesFromTencent()
-            return (quotes, true)
+    /// 指数获取:按设置选择数据源;auto 模式下东财失败自动切腾讯
+    private func fetchIndicesWithFallback() async throws -> (quotes: [IndexQuote], usedFallback: Bool, forcedMode: DataSourceMode?) {
+        switch dataSourceMode {
+        case .eastmoney:
+            return (try await fetchIndicesFromEastmoney(), false, .eastmoney)
+        case .tencent:
+            return (try await fetchIndicesFromTencent(), true, .tencent)
+        case .auto:
+            do {
+                return (try await fetchIndicesFromEastmoney(), false, nil)
+            } catch {
+                return (try await fetchIndicesFromTencent(), true, nil)
+            }
         }
     }
 
     private func fetchIndicesFromEastmoney() async throws -> [IndexQuote] {
         let defs = IndexDef.all
         let quotes = try await EastmoneyAPI.shared.fetchQuotes(secids: defs.map(\.secid))
+        let fallbackDate = TradingDay.string(TradingDay.mostRecent())
         return defs.map { def in
             let quote = quotes[def.codePart] ?? quotes[def.name]
             return IndexQuote(
                 def: def,
                 price: quote?.price,
                 change: quote?.change,
-                changePercent: quote?.changePercent
+                changePercent: quote?.changePercent,
+                dataDate: fallbackDate
             )
         }
     }
@@ -120,16 +156,18 @@ final class MarketStore: ObservableObject {
         let defs = IndexDef.all
         let supported = defs.filter { $0.tencentCode != nil }
         let tencentQuotes = try await TencentAPI.shared.fetchQuotes(codes: supported.compactMap(\.tencentCode))
+        let fallbackDate = TradingDay.string(TradingDay.mostRecent())
         return defs.map { def in
             guard let code = def.tencentCode, let quote = tencentQuotes[code] else {
                 // 腾讯源不支持(日经225/韩国KOSPI),置空由 UI 显示"暂不可用"
-                return IndexQuote(def: def, price: nil, change: nil, changePercent: nil)
+                return IndexQuote(def: def, price: nil, change: nil, changePercent: nil, dataDate: nil)
             }
             return IndexQuote(
                 def: def,
                 price: quote.price,
                 change: quote.change,
-                changePercent: quote.changePercent
+                changePercent: quote.changePercent,
+                dataDate: quote.dataDate ?? fallbackDate
             )
         }
     }

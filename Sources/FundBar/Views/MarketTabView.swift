@@ -11,6 +11,9 @@ struct MarketTabView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 3) {
+                if let notice = store.marketClosedNotice {
+                    closedNoticeBar(notice)
+                }
                 if store.indexQuotes.isEmpty {
                     emptyState
                 }
@@ -27,6 +30,23 @@ struct MarketTabView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
         }
+    }
+
+    /// 非交易日提示条:展示上一交易日收盘行情
+    private func closedNoticeBar(_ notice: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "moon.zzz.fill")
+                .font(.system(size: 11))
+            Text(notice)
+                .font(.caption)
+                .fontWeight(.medium)
+            Spacer()
+        }
+        .foregroundStyle(.orange)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(Color.orange.opacity(0.12)))
+        .padding(.bottom, 4)
     }
 
     private var emptyState: some View {

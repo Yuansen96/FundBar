@@ -9,6 +9,7 @@ struct SettingsPage: View {
     @AppStorage(SettingsKey.refreshInterval) private var refreshInterval = 60.0
     @AppStorage(SettingsKey.alertEnabled) private var alertEnabled = false
     @AppStorage(SettingsKey.alertThreshold) private var alertThreshold = 2.0
+    @AppStorage(SettingsKey.dataSource) private var dataSourceRaw = DataSourceMode.auto.rawValue
     @ObservedObject private var store = MarketStore.shared
 
     var body: some View {
@@ -32,6 +33,24 @@ struct SettingsPage: View {
                                 Text("图标 + 指数涨跌").tag("iconText")
                             }
                             Text("系统状态栏只支持单色文字,红绿配色在面板内展示;展开面板可查看完整行情。")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(4)
+                    }
+
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Picker("行情数据源", selection: $dataSourceRaw) {
+                                ForEach(DataSourceMode.allCases) { mode in
+                                    Text(mode.label).tag(mode.rawValue)
+                                }
+                            }
+                            .onChange(of: dataSourceRaw) { _ in
+                                store.applyDataSourceSetting()
+                            }
+                            Text("自动:东财优先,失败(如 IPv6 异常网络)自动切换腾讯备用源。日经225 / KOSPI 与板块榜仅东财提供。")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -96,7 +115,7 @@ struct SettingsPage: View {
                             Text("关于 FundBar")
                                 .font(.callout)
                                 .fontWeight(.medium)
-                            Text("版本 0.3.0 · SwiftUI 原生 macOS 菜单栏基金行情工具")
+                            Text("版本 0.4.0 · SwiftUI 原生 macOS 菜单栏基金行情工具")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text("数据来源:东方财富、蛋卷基金公开接口(非官方,无可用性保证)。本项目仅供学习交流,不构成任何投资建议。")

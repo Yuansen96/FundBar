@@ -46,8 +46,80 @@ struct IndexQuote: Identifiable {
     let price: Double?
     let change: Double?
     let changePercent: Double?
+    /// 行情所属交易日(yyyy-MM-dd);非交易日展示上一交易日
+    let dataDate: String?
 
     var id: String { def.secid }
+}
+
+// MARK: - 交易日推算
+
+enum TradingDay {
+    private static var calendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
+        return cal
+    }
+
+    private static let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        return formatter
+    }()
+
+    private static let weekdayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE"
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        formatter.locale = Locale(identifier: "zh_CN")
+        return formatter
+    }()
+
+    /// 最近交易日(周末回退到周五;法定节假日无法本地判断,以接口返回数据为准)
+    static func mostRecent(from date: Date = Date()) -> Date {
+        let cal = calendar
+        var day = cal.startOfDay(for: date)
+        while cal.isDateInWeekend(day) {
+            guard let previous = cal.date(byAdding: .day, value: -1, to: day) else { break }
+            day = previous
+        }
+        return day
+    }
+
+    static func isWeekend(_ date: Date = Date()) -> Bool {
+        calendar.isDateInWeekend(date)
+    }
+
+    static func string(_ date: Date) -> String {
+        formatter.string(from: date)
+    }
+
+    /// 如 "星期五"
+    static func weekdayLabel(_ date: Date) -> String {
+        weekdayFormatter.string(from: date)
+    }
+
+    static func date(from string: String) -> Date? {
+        formatter.date(from: string)
+    }
+}
+
+// MARK: - 数据源模式
+
+enum DataSourceMode: String, CaseIterable, Identifiable {
+    case auto          // 东财优先,失败切腾讯
+    case eastmoney     // 仅东财
+    case tencent       // 仅腾讯
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .auto: return "自动(推荐)"
+        case .eastmoney: return "仅东方财富"
+        case .tencent: return "仅腾讯"
+        }
+    }
 }
 
 struct SectorQuote: Identifiable, Hashable {
@@ -161,4 +233,6 @@ enum SettingsKey {
     static let alertThreshold = "fundbar.alert.threshold"
     /// 已发送提醒的 key 列表(防重复)
     static let alertNotified = "fundbar.alert.notified"
+    /// 行情数据源:"auto" | "eastmoney" | "tencent"
+    static let dataSource = "fundbar.datasource"
 }
