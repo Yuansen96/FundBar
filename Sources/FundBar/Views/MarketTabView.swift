@@ -22,7 +22,10 @@ struct MarketTabView: View {
                     if !quotes.isEmpty {
                         regionHeader(region)
                         ForEach(quotes) { quote in
-                            IndexRow(quote: quote)
+                            IndexRow(
+                                quote: quote,
+                                sparkline: store.sparklines[quote.def.secid]
+                            )
                         }
                     }
                 }
@@ -82,6 +85,7 @@ struct MarketTabView: View {
 
 struct IndexRow: View {
     let quote: IndexQuote
+    var sparkline: [Double]?
     @State private var hovered = false
 
     private var isUnavailable: Bool {
@@ -104,6 +108,12 @@ struct IndexRow: View {
             }
             Spacer()
 
+            if let sparkline, sparkline.count > 1, !isUnavailable {
+                SparklineView(values: sparkline)
+                    .frame(width: 44, height: 16)
+                    .help("近 20 个交易日(腾讯源)")
+            }
+
             if isUnavailable {
                 Text("当前网络暂不可用")
                     .font(.system(size: 11))
@@ -111,10 +121,12 @@ struct IndexRow: View {
             } else {
                 Text(quote.price?.priceText ?? "--")
                     .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .contentTransition(.numericText())
                     .frame(minWidth: 62, alignment: .trailing)
                 Text(quote.change?.changeText ?? "--")
                     .font(.system(size: 12).monospacedDigit())
                     .foregroundStyle(CnStyle.color(for: quote.changePercent))
+                    .contentTransition(.numericText())
                     .frame(width: 58, alignment: .trailing)
                 changePill
             }
@@ -127,6 +139,7 @@ struct IndexRow: View {
         )
         .onHover { hovered = $0 }
         .animation(.easeOut(duration: 0.12), value: hovered)
+        .animation(.easeInOut(duration: 0.3), value: quote.changePercent)
     }
 
     /// 白字彩底渐变胶囊
@@ -135,6 +148,7 @@ struct IndexRow: View {
         return Text(quote.changePercent?.percentText ?? "--")
             .font(.system(size: 11.5, weight: .bold).monospacedDigit())
             .foregroundStyle(.white)
+            .contentTransition(.numericText())
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(

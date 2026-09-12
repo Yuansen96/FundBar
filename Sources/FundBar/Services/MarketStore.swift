@@ -10,6 +10,8 @@ final class MarketStore: ObservableObject {
     @Published private(set) var sectorLosers: [SectorQuote] = []
     /// 持仓基金的最新净值信息,key 为基金代码
     @Published private(set) var fundQuotes: [String: FundDetail] = [:]
+    /// 指数迷你走势(secid -> 最近 20 日收盘价),腾讯日线,10 分钟缓存
+    @Published private(set) var sparklines: [String: [Double]] = [:]
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var isLoading = false
     /// 致命错误:所有数据源都失败
@@ -25,6 +27,8 @@ final class MarketStore: ObservableObject {
 
     private var timer: Timer?
     private var hasLoadedOnce = false
+    private var sparklinesLoadedAt: Date?
+    private var isLoadingSparklines = false
 
     private init() {
         startTimer()
@@ -117,6 +121,56 @@ final class MarketStore: ObservableObject {
             hasLoadedOnce = true
             await refreshFundQuotes()
             checkAlerts()
+            await loadSparklinesIfNeeded()
+        }
+    }
+
+    /// 数据源状态明细(页脚悬停提示)
+    var sourceDetailText: String {
+        var parts: [String] = []
+        if errorMessage != nil {
+            parts.append("指数:不可用")
+        } else if dataSourceMode == .tencent || dataSourceNote != nil {
+            parts.append("指数:腾讯源")
+        } else {
+            parts.append("指数:东财")
+        }
+        if indexQuotes.contains(where: { $0.def.secid == "100.N225" && $0.price == nil }) {
+            parts.append("日经/KOSPI:暂缺")
+        }
+        if dataSourceMode == .tencent || sectorError != nil {
+            parts.append("板块:不可用")
+        } else {
+            parts.append("板块:东财")
+        }
+        parts.append("基金:蛋卷")
+        return parts.joined(separator: " · ")
+    }
+
+    /// 迷你走势 10 分钟缓存,过期后从腾讯日线接口并发拉取
+    private func loadSparklinesIfNeeded() async {
+        guard !isLoadingSparklines else { return }
+        if let loaded = sparklinesLoadedAt, Date().timeIntervalSince(loaded) < 600 { return }
+        isLoadingSparklines = true
+        defer { isLoadingSparklines = false }
+        var result: [String: [Double]] = [:]
+        await withTaskGroup(of: (String, [Double])?.self) { group in
+            for def in IndexDef.all {
+                guard let code = def.tencentCode else { continue }
+                group.addTask {
+                    guard let closes = try? await TencentAPI.shared.fetchDailyCloses(code: code), !closes.isEmpty else {
+                        return nil
+                    }
+                    return (def.secid, closes)
+                }
+            }
+            for await pair in group {
+                if let pair { result[pair.0] = pair.1 }
+            }
+        }
+        if !result.isEmpty {
+            sparklines = result
+            sparklinesLoadedAt = Date()
         }
     }
 

@@ -1,8 +1,11 @@
 import SwiftUI
+import ServiceManagement
 
 /// 设置页:菜单栏显示模式、菜单栏指数(最多 3 个)、刷新间隔、关于
 struct SettingsPage: View {
     var onBack: () -> Void
+
+    @State private var launchAtLoginError: String?
 
     @AppStorage(SettingsKey.menuBarMode) private var menuBarMode = "icon"
     @AppStorage(SettingsKey.menuBarCodes) private var codesRaw = "1.000001"
@@ -111,11 +114,40 @@ struct SettingsPage: View {
                     }
 
                     GroupBox {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle(
+                                "登录时自动启动",
+                                isOn: Binding(
+                                    get: { SMAppService.mainApp.status == .enabled },
+                                    set: { newValue in
+                                        launchAtLoginError = nil
+                                        do {
+                                            if newValue {
+                                                try SMAppService.mainApp.register()
+                                            } else {
+                                                try SMAppService.mainApp.unregister()
+                                            }
+                                        } catch {
+                                            launchAtLoginError = "设置失败:\(error.localizedDescription)"
+                                        }
+                                    }
+                                )
+                            )
+                            if let launchAtLoginError {
+                                Text(launchAtLoginError)
+                                    .font(.caption2)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                        .padding(4)
+                    }
+
+                    GroupBox {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("关于 FundBar")
                                 .font(.callout)
                                 .fontWeight(.medium)
-                            Text("版本 0.4.1 · SwiftUI 原生 macOS 菜单栏基金行情工具")
+                            Text("版本 0.5.0 · SwiftUI 原生 macOS 菜单栏基金行情工具")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text("数据来源:东方财富、蛋卷基金公开接口(非官方,无可用性保证)。本项目仅供学习交流,不构成任何投资建议。")

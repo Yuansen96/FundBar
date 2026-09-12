@@ -31,6 +31,10 @@ struct DanjuanAPI {
             let end_date: String?
             let unit_nav: FlexibleString?
             let nav_grtd: FlexibleString?
+            let nav_grl1m: FlexibleString?
+            let nav_grl3m: FlexibleString?
+            let nav_grl6m: FlexibleString?
+            let nav_grl1y: FlexibleString?
         }
         struct Payload: Decodable {
             let fd_code: String?
@@ -57,17 +61,31 @@ struct DanjuanAPI {
         try await HTTPClient.shared.get(urlString, referer: "https://danjuanfunds.com/")
     }
 
-    /// 基金详情:名称、最新净值、当日涨跌幅
+    /// 基金详情:名称、最新净值、当日涨跌幅、阶段涨幅
     func fetchFundDetail(code: String) async throws -> FundDetail {
         let data = try await get("https://danjuanfunds.com/djapi/fund/\(code)")
         let decoded = try JSONDecoder().decode(DetailResponse.self, from: data)
         let payload = decoded.data
+        let derived = payload?.fund_derived
+
+        var stageReturns: [StageReturn] = []
+        let stages: [(String, FlexibleString?)] = [
+            ("近1月", derived?.nav_grl1m),
+            ("近3月", derived?.nav_grl3m),
+            ("近6月", derived?.nav_grl6m),
+            ("近1年", derived?.nav_grl1y),
+        ]
+        for (label, value) in stages where value?.doubleValue != nil {
+            stageReturns.append(StageReturn(label: label, percent: value!.doubleValue!))
+        }
+
         return FundDetail(
             code: payload?.fd_code ?? code,
             name: payload?.fd_name ?? code,
-            unitNav: payload?.fund_derived?.unit_nav?.doubleValue,
-            navDate: payload?.fund_derived?.end_date,
-            dayChangePercent: payload?.fund_derived?.nav_grtd?.doubleValue
+            unitNav: derived?.unit_nav?.doubleValue,
+            navDate: derived?.end_date,
+            dayChangePercent: derived?.nav_grtd?.doubleValue,
+            stageReturns: stageReturns
         )
     }
 

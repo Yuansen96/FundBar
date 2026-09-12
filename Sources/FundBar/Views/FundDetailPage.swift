@@ -50,6 +50,7 @@ struct FundDetailPage: View {
                 .frame(maxWidth: .infinity, minHeight: 280)
             } else {
                 statsSection
+                stageReturnsSection
                 rangePicker
                 chartSection
             }
@@ -106,6 +107,31 @@ struct FundDetailPage: View {
             statCard(title: "当日盈亏", value: dayPnl.map(\.yuanText) ?? "--", color: dayPnl.map { CnStyle.color(for: $0) } ?? .secondary)
             statCard(title: "持有收益", value: totalPnl.map(\.yuanText) ?? "--", color: totalPnl.map { CnStyle.color(for: $0) } ?? .secondary)
             statCard(title: "收益率", value: totalPercent?.percentText ?? "--", color: totalPercent.map { CnStyle.color(for: $0) } ?? .secondary)
+        }
+    }
+
+    /// 阶段涨幅(近1月/3月/6月/1年),蛋卷有则展示
+    private var stageReturnsSection: some View {
+        let stages = detail?.stageReturns ?? []
+        return Group {
+            if !stages.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(stages) { stage in
+                        VStack(spacing: 2) {
+                            Text(stage.label)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(stage.percent.percentText)
+                                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(CnStyle.color(for: stage.percent))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background(Color.primary.opacity(0.03))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
         }
     }
 

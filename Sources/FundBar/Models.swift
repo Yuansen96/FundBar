@@ -130,12 +130,36 @@ struct SectorQuote: Identifiable, Hashable {
     var id: String { code }
 }
 
+struct StageReturn: Equatable, Identifiable {
+    let label: String
+    let percent: Double
+    var id: String { label }
+}
+
 struct FundDetail: Equatable {
     let code: String
     let name: String
     let unitNav: Double?
     let navDate: String?
     let dayChangePercent: Double?
+    /// 阶段涨幅(近1月/3月/6月/1年),蛋卷有则填充
+    let stageReturns: [StageReturn]
+
+    init(
+        code: String,
+        name: String,
+        unitNav: Double? = nil,
+        navDate: String? = nil,
+        dayChangePercent: Double? = nil,
+        stageReturns: [StageReturn] = []
+    ) {
+        self.code = code
+        self.name = name
+        self.unitNav = unitNav
+        self.navDate = navDate
+        self.dayChangePercent = dayChangePercent
+        self.stageReturns = stageReturns
+    }
 }
 
 struct NavPoint: Identifiable, Equatable {

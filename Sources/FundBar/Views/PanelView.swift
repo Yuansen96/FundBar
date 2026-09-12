@@ -122,6 +122,7 @@ struct MarketFooterView: View {
                 Text("已连接 · 更新于 \(date.formatted(.dateTime.hour().minute().second()))")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    .help(store.sourceDetailText)
             } else {
                 Text("尚未连接")
                     .font(.caption2)

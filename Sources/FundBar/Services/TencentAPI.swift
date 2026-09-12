@@ -67,6 +67,48 @@ struct TencentAPI {
         }
         return nil
     }
+
+    // MARK: - 日线(迷你走势图数据)
+
+    private struct KlineResponse: Decodable {
+        struct Payload: Decodable {
+            /// qfqday(前复权)或 day,腾讯两种键都出现过
+            let qfqday: [[KlineValue]]?
+            let day: [[KlineValue]]?
+        }
+        /// 行数据:["2026-09-11", "open", "close", "high", "low", "volume", ...],部分元素可为字符串
+        struct KlineValue: Decodable {
+            let value: String
+            init(from decoder: Decoder) throws {
+                let container = try decoder.singleValueContainer()
+                if let string = try? container.decode(String.self) {
+                    value = string
+                } else {
+                    value = String(try container.decode(Double.self))
+                }
+            }
+        }
+        let data: [String: Payload]?
+    }
+
+    /// 拉取最近 count 个交易日收盘价(用于迷你走势),按时间升序返回
+    func fetchDailyCloses(code: String, count: Int = 20) async throws -> [Double] {
+        let urlString = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=\(code),day,,,\(count),qfq"
+        let data = try await HTTPClient.shared.get(urlString, referer: "https://gu.qq.com/")
+        return try Self.parseDailyCloses(from: data)
+    }
+
+    /// 纯解析(供测试):从日线 JSON 中提取收盘价序列
+    static func parseDailyCloses(from data: Data) throws -> [Double] {
+        let decoded = try JSONDecoder().decode(KlineResponse.self, from: data)
+        guard let payload = decoded.data?.values.first else { return [] }
+        let rows = payload.qfqday ?? payload.day ?? []
+        let closes = rows.compactMap { row -> Double? in
+            guard row.count > 2 else { return nil }
+            return Double(row[2].value)
+        }
+        return Array(closes.suffix(rows.count))
+    }
 }
 
 private extension String.Encoding {

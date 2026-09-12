@@ -214,6 +214,41 @@ enum TestRun {
         check(empty.length == 0, "全部无数据时输出空摘要")
     }
 
+    static func sparklineAndStageTests() {
+        print("迷你走势与阶段涨幅:")
+        // 腾讯日线 JSON(数字/字符串混合类型)
+        let klineJSON = """
+        {"code":0,"data":{"sh000001":{"qfqday":[
+            ["2026-09-09","3910.92","3934.40","3934.40","3890.10","100"],
+            ["2026-09-10",3888.11,3934.40,3940.00,3852.03,"200"],
+            ["2026-09-11","3852.03","3888.11","3890.00","3800.00","300"]
+        ]}}}
+        """
+        do {
+            let closes = try TencentAPI.parseDailyCloses(from: Data(klineJSON.utf8))
+            check(closes.count == 3, "日线行数")
+            checkEqual(closes[0], 3934.40, accuracy: 0.001, "qfqday 收盘价(字符串)")
+            checkEqual(closes[1], 3934.40, accuracy: 0.001, "day 收盘价(数字混合)")
+            checkEqual(closes[2], 3888.11, accuracy: 0.001, "最新收盘价")
+        } catch {
+            check(false, "日线解析异常:\(error)")
+        }
+
+        // 蛋卷阶段涨幅
+        let detailJSON = """
+        {"data":{"fd_code":"161725","fd_name":"招商中证白酒指数","fund_derived":{"end_date":"2026-09-11",
+        "unit_nav":"0.5337","nav_grtd":"-1.5132","nav_grl1m":"-6.74","nav_grl3m":"-2.14","nav_grl6m":"-18.93","nav_grl1y":"-36.31"}}}
+        """
+        do {
+            let decoded = try JSONDecoder().decode(DanjuanAPI.DetailResponse.self, from: Data(detailJSON.utf8))
+            let derived = decoded.data?.fund_derived
+            checkEqual(derived?.nav_grl1m?.doubleValue ?? 0, -6.74, accuracy: 0.001, "近1月涨幅字段")
+            check(derived?.nav_grl1y?.doubleValue == -36.31, "近1年涨幅字段")
+        } catch {
+            check(false, "详情解析异常:\(error)")
+        }
+    }
+
     static func runAll() {
         holdingMathTests()
         eastmoneyDecodeTests()
@@ -223,6 +258,7 @@ enum TestRun {
         tencentDateTests()
         tradingDayTests()
         menuBarRendererTests()
+        sparklineAndStageTests()
         alertTests()
         print("")
         if failureCount == 0 {
