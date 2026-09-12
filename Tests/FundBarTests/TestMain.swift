@@ -322,6 +322,26 @@ enum TestRun {
         checkEqual(nextFloor.timeIntervalSince1970, 1_000_030, accuracy: 0.001, "手动模式失败退避按 30s 下限")
     }
 
+    static func syncLoopGuardTests() {
+        print("同步防乒乓与熔断:")
+        let h = [Holding(code: "161725", name: "白酒", amount: 10000, cost: nil)]
+        var a = SyncPayload.build(from: h)
+        a.updatedAt = Date(timeIntervalSince1970: 1_000_000)
+        var b = SyncPayload.build(from: h)
+        b.updatedAt = Date(timeIntervalSince1970: 2_000_000)
+        check(a == b, "内容相同则等值(忽略时间戳)→ 不回推,防乒乓")
+        var c = SyncPayload.build(from: h)
+        c.updatedAt = a.updatedAt
+        c.settings[SettingsKey.refreshInterval] = .double(300)
+        check(a != c, "设置不同则不等值 → 正常推送")
+
+        let now = Date()
+        check(!RefreshPolicy.eastMoneyInCooldown(consecutiveFailures: 0, lastFailureAt: now, now: now), "无失败不熔断")
+        check(!RefreshPolicy.eastMoneyInCooldown(consecutiveFailures: 1, lastFailureAt: now, now: now), "仅失败 1 次不熔断")
+        check(RefreshPolicy.eastMoneyInCooldown(consecutiveFailures: 2, lastFailureAt: now, now: now), "连续失败 2 次进入冷却")
+        check(!RefreshPolicy.eastMoneyInCooldown(consecutiveFailures: 2, lastFailureAt: now.addingTimeInterval(-301), now: now), "冷却期(5 分钟)过后重新试探")
+    }
+
     static func runAll() {
         holdingMathTests()
         eastmoneyDecodeTests()
@@ -335,6 +355,7 @@ enum TestRun {
         searchAndEstimateTests()
         syncPayloadTests()
         refreshPolicyTests()
+        syncLoopGuardTests()
         alertTests()
         print("")
         if failureCount == 0 {

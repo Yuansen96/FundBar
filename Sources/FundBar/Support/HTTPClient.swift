@@ -7,7 +7,7 @@ struct HTTPClient {
 
     private let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForRequest = 8
         config.waitsForConnectivity = false
         return URLSession(configuration: config)
     }()

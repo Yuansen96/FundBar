@@ -134,7 +134,7 @@ struct MarketFooterView: View {
                     .controlSize(.small)
             }
             Button {
-                Task { await store.refresh(showLoading: false) }
+                Task { await store.refresh(showLoading: true) }
             } label: {
                 Image(systemName: "arrow.clockwise")
             }

@@ -24,6 +24,7 @@ final class SyncService: ObservableObject {
     /// 最近一次采用的远端 updatedAt
     private var lastAppliedRemoteUpdatedAt: Date?
     private var isApplyingRemote = false
+    private var lastAppliedRemotePayload: SyncPayload?
 
     private init() {}
 
@@ -96,6 +97,8 @@ final class SyncService: ObservableObject {
     func pushIfNeeded() {
         guard isEnabled, let fileURL = Self.syncFileURL else { return }
         var payload = SyncPayload.build(from: MarketStore.shared.holdings)
+        // 刚从远端应用的内容不再回推,防止两台设备乒乓循环
+        if let last = lastAppliedRemotePayload, payload == last { return }
         let now = Date()
         payload.updatedAt = now
         do {
@@ -132,6 +135,7 @@ final class SyncService: ObservableObject {
         isApplyingRemote = true
         defer { isApplyingRemote = false }
         payload.apply()
+        lastAppliedRemotePayload = payload
         lastAppliedRemoteUpdatedAt = payload.updatedAt
         lastSyncedAt = Date()
     }

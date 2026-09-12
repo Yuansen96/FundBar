@@ -34,6 +34,8 @@ final class MarketStore: ObservableObject {
     private var consecutiveFailures = 0
     private var nextAllowedRefresh = Date.distantPast
     private var isRefreshing = false
+    private var eastMoneyConsecutiveFailures = 0
+    private var eastMoneyLastFailureAt: Date?
 
     private init() {
         startTimer()
@@ -94,7 +96,16 @@ final class MarketStore: ObservableObject {
         guard !isRefreshing else { return }
         isRefreshing = true
         if showLoading { isLoading = true }
-        defer { if showLoading { isLoading = false } }
+        // 看门狗:90 秒后强制解除刷新锁,防止极端挂起导致刷新按钮永久失效
+        let watchdog = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 90_000_000_000)
+            isRefreshing = false
+        }
+        defer {
+            watchdog.cancel()
+            isRefreshing = false
+            if showLoading { isLoading = false }
+        }
 
         // 指数:按数据源设置获取(auto 模式东财 -> 腾讯 降级链)
         var indices: [IndexQuote]?
@@ -208,9 +219,24 @@ final class MarketStore: ObservableObject {
         case .tencent:
             return (try await fetchIndicesFromTencent(), true, .tencent)
         case .auto:
+            // 东财熔断:连续失败冷却期内直接走腾讯,避免每次刷新都白等它超时
+            if RefreshPolicy.eastMoneyInCooldown(
+                consecutiveFailures: eastMoneyConsecutiveFailures,
+                lastFailureAt: eastMoneyLastFailureAt
+            ) {
+                do {
+                    return (try await fetchIndicesFromTencent(), true, .tencent)
+                } catch {
+                    return (try await fetchIndicesFromEastmoney(), false, .eastmoney)
+                }
+            }
             do {
-                return (try await fetchIndicesFromEastmoney(), false, nil)
+                let quotes = try await fetchIndicesFromEastmoney()
+                eastMoneyConsecutiveFailures = 0
+                return (quotes, false, nil)
             } catch {
+                eastMoneyConsecutiveFailures += 1
+                eastMoneyLastFailureAt = Date()
                 return (try await fetchIndicesFromTencent(), true, nil)
             }
         }

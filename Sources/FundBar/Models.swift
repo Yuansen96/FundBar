@@ -266,10 +266,15 @@ enum SyncValue: Codable, Equatable {
 }
 
 /// 同步到 iCloud Drive 的完整载荷;updatedAt 新者整体覆盖
-struct SyncPayload: Codable {
+struct SyncPayload: Codable, Equatable {
     var updatedAt: Date
     var holdings: [Holding]
     var settings: [String: SyncValue]
+
+    /// 内容等值比较(忽略 updatedAt):用于防止 iCloud 同步乒乓循环
+    static func == (lhs: SyncPayload, rhs: SyncPayload) -> Bool {
+        lhs.holdings == rhs.holdings && lhs.settings == rhs.settings
+    }
 
     static func build(from holdings: [Holding]) -> SyncPayload {
         let defaults = UserDefaults.standard
@@ -322,6 +327,12 @@ enum RefreshPolicy {
     static func nextAllowedAt(lastInterval: Double, consecutiveFailures: Int, from: Date) -> Date {
         let base = max(lastInterval, 30)
         return from.addingTimeInterval(base * backoffMultiplier(consecutiveFailures: consecutiveFailures))
+    }
+
+    /// 东财熔断:连续失败 ≥2 次且距上次失败不足冷却期(默认 5 分钟)时,自动模式先走腾讯
+    static func eastMoneyInCooldown(consecutiveFailures: Int, lastFailureAt: Date?, now: Date = Date(), cooldown: TimeInterval = 300) -> Bool {
+        guard consecutiveFailures >= 2, let lastFailureAt else { return false }
+        return now.timeIntervalSince(lastFailureAt) < cooldown
     }
 }
 
