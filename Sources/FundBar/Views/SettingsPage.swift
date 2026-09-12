@@ -7,6 +7,7 @@ struct SettingsPage: View {
 
     @State private var launchAtLoginError: String?
     @State private var launchAtLoginOn = false
+    @State private var launchAtLoginPoll: Timer?
 
     @AppStorage(SettingsKey.menuBarMode) private var menuBarMode = "icon"
     @AppStorage(SettingsKey.menuBarCodes) private var codesRaw = "1.000001"
@@ -183,11 +184,6 @@ struct SettingsPage: View {
                                     } catch {
                                         launchAtLoginError = "设置失败:\(error.localizedDescription)"
                                     }
-                                    // 注册状态由系统异步生效,稍后按真实状态校正开关
-                                    Task { @MainActor in
-                                        try? await Task.sleep(nanoseconds: 400_000_000)
-                                        launchAtLoginOn = Self.loginItemEnabled
-                                    }
                                 }
                             Text(launchAtLoginStatusText)
                                 .font(.caption2)
@@ -221,7 +217,24 @@ struct SettingsPage: View {
             Spacer()
         }
         .padding(14)
-        .onAppear { launchAtLoginOn = Self.loginItemEnabled }
+        .onAppear {
+            launchAtLoginOn = Self.loginItemEnabled
+            startLoginItemPoll()
+        }
+        .onDisappear {
+            launchAtLoginPoll?.invalidate()
+            launchAtLoginPoll = nil
+        }
+    }
+
+    /// 系统登录项状态异步生效(可达数秒),设置页可见期间每秒对齐开关显示
+    private func startLoginItemPoll() {
+        launchAtLoginPoll?.invalidate()
+        launchAtLoginPoll = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            Task { @MainActor in
+                launchAtLoginOn = Self.loginItemEnabled
+            }
+        }
     }
 
     private var selectedCodes: Set<String> {
