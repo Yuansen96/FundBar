@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupPopover()
         observeUpdates()
         updateStatusItem()
+        SyncService.shared.start()
     }
 
     // MARK: - 状态项与弹窗

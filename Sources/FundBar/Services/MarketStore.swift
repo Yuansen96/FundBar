@@ -305,6 +305,11 @@ final class MarketStore: ObservableObject {
         fundEstimates[code] = nil
     }
 
+    /// iCloud 同步整包应用(远端覆盖本地)
+    func replaceHoldings(_ newHoldings: [Holding]) {
+        holdings = newHoldings
+    }
+
     private func saveHoldings() {
         guard let data = try? JSONEncoder().encode(holdings) else { return }
         UserDefaults.standard.set(data, forKey: SettingsKey.holdings)

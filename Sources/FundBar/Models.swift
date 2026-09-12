@@ -240,6 +240,66 @@ enum FundAlert {
     }
 }
 
+// MARK: - iCloud 同步载荷
+
+/// 设置值的类型化包装(JSON 编解码需要区分类型)
+enum SyncValue: Codable, Equatable {
+    case string(String)
+    case double(Double)
+    case bool(Bool)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let bool = try? container.decode(Bool.self) { self = .bool(bool); return }
+        if let double = try? container.decode(Double.self) { self = .double(double); return }
+        self = .string(try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value): try container.encode(value)
+        case .double(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        }
+    }
+}
+
+/// 同步到 iCloud Drive 的完整载荷;updatedAt 新者整体覆盖
+struct SyncPayload: Codable {
+    var updatedAt: Date
+    var holdings: [Holding]
+    var settings: [String: SyncValue]
+
+    static func build(from holdings: [Holding]) -> SyncPayload {
+        let defaults = UserDefaults.standard
+        var settings: [String: SyncValue] = [:]
+        settings[SettingsKey.menuBarMode] = .string(defaults.string(forKey: SettingsKey.menuBarMode) ?? "icon")
+        settings[SettingsKey.menuBarCodes] = .string(defaults.string(forKey: SettingsKey.menuBarCodes) ?? "1.000001")
+        settings[SettingsKey.dataSource] = .string(defaults.string(forKey: SettingsKey.dataSource) ?? DataSourceMode.auto.rawValue)
+        settings[SettingsKey.refreshInterval] = .double(defaults.double(forKey: SettingsKey.refreshInterval))
+        settings[SettingsKey.alertEnabled] = .bool(defaults.bool(forKey: SettingsKey.alertEnabled))
+        settings[SettingsKey.alertThreshold] = .double(defaults.double(forKey: SettingsKey.alertThreshold))
+        return SyncPayload(updatedAt: Date(), holdings: holdings, settings: settings)
+    }
+
+    /// 应用远端载荷:设置写回 UserDefaults(@AppStorage 自动感知),持仓交给 MarketStore
+    func apply() {
+        let defaults = UserDefaults.standard
+        for (key, value) in settings {
+            switch value {
+            case .string(let string): defaults.set(string, forKey: key)
+            case .double(let double): defaults.set(double, forKey: key)
+            case .bool(let bool): defaults.set(bool, forKey: key)
+            }
+        }
+        Task { @MainActor in
+            MarketStore.shared.replaceHoldings(holdings)
+            await MarketStore.shared.refresh(showLoading: false)
+        }
+    }
+}
+
 // MARK: - 设置键
 
 enum SettingsKey {
@@ -259,4 +319,6 @@ enum SettingsKey {
     static let alertNotified = "fundbar.alert.notified"
     /// 行情数据源:"auto" | "eastmoney" | "tencent"
     static let dataSource = "fundbar.datasource"
+    /// iCloud 同步开关
+    static let icloudSyncEnabled = "fundbar.icloud.enabled"
 }

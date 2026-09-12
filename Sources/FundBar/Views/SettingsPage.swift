@@ -13,7 +13,9 @@ struct SettingsPage: View {
     @AppStorage(SettingsKey.alertEnabled) private var alertEnabled = false
     @AppStorage(SettingsKey.alertThreshold) private var alertThreshold = 2.0
     @AppStorage(SettingsKey.dataSource) private var dataSourceRaw = DataSourceMode.auto.rawValue
+    @AppStorage(SettingsKey.icloudSyncEnabled) private var icloudSync = true
     @ObservedObject private var store = MarketStore.shared
+    @ObservedObject private var sync = SyncService.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -115,6 +117,37 @@ struct SettingsPage: View {
 
                     GroupBox {
                         VStack(alignment: .leading, spacing: 8) {
+                            switch sync.availability {
+                            case .available:
+                                Toggle("iCloud 同步持仓与设置", isOn: $icloudSync)
+                                    .onChange(of: icloudSync) {
+                                        UserDefaults.standard.set(icloudSync, forKey: SettingsKey.icloudSyncEnabled)
+                                        if icloudSync { sync.pushIfNeeded() }
+                                    }
+                                if let last = sync.lastSyncedAt {
+                                    Text("上次同步 \(last.formatted(.dateTime.month().day().hour().minute()))")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                Text("数据写入 iCloud Drive/FundBar/,同一 Apple ID 的其他 Mac 自动互相同步(新时间戳整体覆盖)。")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            case .checking:
+                                Text("正在检查 iCloud Drive…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            case .unavailable(let reason):
+                                Text("iCloud 同步不可用:\(reason)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(4)
+                    }
+
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 8) {
                             Toggle(
                                 "登录时自动启动",
                                 isOn: Binding(
@@ -147,7 +180,7 @@ struct SettingsPage: View {
                             Text("关于 FundBar")
                                 .font(.callout)
                                 .fontWeight(.medium)
-                            Text("版本 0.6.1 · SwiftUI 原生 macOS 菜单栏基金行情工具")
+                            Text("版本 0.7.0 · SwiftUI 原生 macOS 菜单栏基金行情工具")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text("数据来源:东方财富、蛋卷基金公开接口(非官方,无可用性保证)。本项目仅供学习交流,不构成任何投资建议。")

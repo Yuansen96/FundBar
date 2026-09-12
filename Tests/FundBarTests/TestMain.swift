@@ -283,6 +283,29 @@ enum TestRun {
         }
     }
 
+    static func syncPayloadTests() {
+        print("iCloud 同步载荷:")
+        let holdings = [Holding(code: "161725", name: "招商中证白酒A", amount: 10000, cost: 11820)]
+        var payload = SyncPayload.build(from: holdings)
+        payload.settings[SettingsKey.alertEnabled] = .bool(true)
+        payload.updatedAt = Date(timeIntervalSince1970: 1_760_000_000)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        do {
+            let data = try encoder.encode(payload)
+            let restored = try decoder.decode(SyncPayload.self, from: data)
+            check(restored.holdings == holdings, "持仓往返一致")
+            check(restored.updatedAt == payload.updatedAt, "时间戳往返一致")
+            check(restored.settings[SettingsKey.alertEnabled] == .bool(true), "布尔设置类型保持")
+            check(restored.settings[SettingsKey.menuBarCodes] == .string("1.000001"), "默认设置键值")
+        } catch {
+            check(false, "同步载荷编解码异常:\(error)")
+        }
+    }
+
     static func runAll() {
         holdingMathTests()
         eastmoneyDecodeTests()
@@ -294,6 +317,7 @@ enum TestRun {
         menuBarRendererTests()
         sparklineAndStageTests()
         searchAndEstimateTests()
+        syncPayloadTests()
         alertTests()
         print("")
         if failureCount == 0 {
