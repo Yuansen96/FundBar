@@ -89,7 +89,7 @@ struct FundDetailPage: View {
     private func heroHeader(_ detail: FundDetail) -> some View {
         let color = CnStyle.color(for: detail.dayChangePercent)
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(detail.unitNav?.priceText ?? "--")
+            Text(detail.unitNav.map { String(format: "%.4f", $0) } ?? "--")
                 .font(.system(size: 26, weight: .heavy, design: .rounded).monospacedDigit())
                 .contentTransition(.numericText())
             Text("净值 · \(detail.navDate ?? "--")")

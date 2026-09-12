@@ -4,7 +4,12 @@ macOS 菜单栏基金行情小工具 —— SwiftUI 原生实现,零第三方依
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2014+-black)
 ![Swift](https://img.shields.io/badge/Swift-5.9%20%2F%20SwiftUI-orange)
+[![tests](https://github.com/Yuansen96/FundBar/actions/workflows/test.yml/badge.svg)](https://github.com/Yuansen96/FundBar/actions/workflows/test.yml)
 ![License](https://img.shields.io/badge/license-MIT-green)
+
+| 主面板 | 基金详情 |
+|---|---|
+| ![主面板](docs/screenshot-panel.png) | ![基金详情](docs/screenshot-detail.png) |
 
 ## 功能
 
