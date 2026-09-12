@@ -147,7 +147,7 @@ struct SettingsPage: View {
                             Text("关于 FundBar")
                                 .font(.callout)
                                 .fontWeight(.medium)
-                            Text("版本 0.5.0 · SwiftUI 原生 macOS 菜单栏基金行情工具")
+                            Text("版本 0.6.0 · SwiftUI 原生 macOS 菜单栏基金行情工具")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text("数据来源:东方财富、蛋卷基金公开接口(非官方,无可用性保证)。本项目仅供学习交流,不构成任何投资建议。")

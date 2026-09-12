@@ -10,6 +10,8 @@ final class MarketStore: ObservableObject {
     @Published private(set) var sectorLosers: [SectorQuote] = []
     /// 持仓基金的最新净值信息,key 为基金代码
     @Published private(set) var fundQuotes: [String: FundDetail] = [:]
+    /// 持仓基金的盘中估算涨跌幅(key 为基金代码;休市/无数据时为空)
+    @Published private(set) var fundEstimates: [String: Double] = [:]
     /// 指数迷你走势(secid -> 最近 20 日收盘价),腾讯日线,10 分钟缓存
     @Published private(set) var sparklines: [String: [Double]] = [:]
     @Published private(set) var lastUpdated: Date?
@@ -226,23 +228,39 @@ final class MarketStore: ObservableObject {
         }
     }
 
-    /// 某只基金的当日涨跌幅(用于持仓盈亏计算)
+    /// 某只基金的当日涨跌幅(净值口径)
     func dayPercent(for code: String) -> Double? {
         fundQuotes[code]?.dayChangePercent
+    }
+
+    /// 展示与盈亏计算口径:盘中优先用估算值,闭市回落到净值涨跌
+    func effectivePercent(for code: String) -> (percent: Double, isEstimate: Bool)? {
+        if let estimate = fundEstimates[code] {
+            return (estimate, true)
+        }
+        if let navPercent = fundQuotes[code]?.dayChangePercent {
+            return (navPercent, false)
+        }
+        return nil
     }
 
     func fundDetail(for code: String) -> FundDetail? {
         fundQuotes[code]
     }
 
-    /// 拉取所有持仓基金的当日净值与涨跌幅
+    /// 拉取所有持仓基金的当日净值(蛋卷)与盘中估值(东财)
     private func refreshFundQuotes() async {
         var updated = fundQuotes
+        var updatedEstimates = fundEstimates
         for holding in holdings {
-            guard let detail = try? await DanjuanAPI.shared.fetchFundDetail(code: holding.code) else { continue }
-            updated[holding.code] = detail
+            if let detail = try? await DanjuanAPI.shared.fetchFundDetail(code: holding.code) {
+                updated[holding.code] = detail
+            }
+            // 休市时接口返回空,置 nil 回落净值口径
+            updatedEstimates[holding.code] = try? await EastmoneyFundAPI.shared.fetchEstimate(code: holding.code)
         }
         fundQuotes = updated
+        fundEstimates = updatedEstimates
     }
 
     // MARK: - 涨跌提醒
@@ -284,6 +302,7 @@ final class MarketStore: ObservableObject {
     func removeHolding(code: String) {
         holdings.removeAll { $0.code == code }
         fundQuotes[code] = nil
+        fundEstimates[code] = nil
     }
 
     private func saveHoldings() {

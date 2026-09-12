@@ -249,6 +249,40 @@ enum TestRun {
         }
     }
 
+    static func searchAndEstimateTests() {
+        print("基金搜索与估值解析:")
+        // fundsuggest 搜索样本(2026-09-12 实测)
+        let searchJSON = """
+        {"ErrCode":0,"ErrMsg":"fromes","Datas":[
+            {"CODE":"012414","NAME":"招商中证白酒指数(LOF)C","JP":"ZSZZBJZSLOFC","CATEGORY":700},
+            {"CODE":"161725","NAME":"招商中证白酒指数(LOF)A","JP":"ZSZZBJZSLOFA","CATEGORY":700}
+        ]}
+        """
+        do {
+            let decoded = try JSONDecoder().decode(EastmoneyFundAPI.SearchResponse.self, from: Data(searchJSON.utf8))
+            let hits = (decoded.Datas ?? []).compactMap { item -> EastmoneyFundAPI.SearchHit? in
+                guard let code = item.CODE, let name = item.NAME else { return nil }
+                return EastmoneyFundAPI.SearchHit(code: code, name: name)
+            }
+            check(hits.count == 2, "搜索结果条数")
+            check(hits.first?.code == "012414", "搜索代码字段")
+            check(hits.last?.name == "招商中证白酒指数(LOF)A", "搜索名称字段")
+        } catch {
+            check(false, "搜索解析异常:\(error)")
+        }
+
+        // 估值样本:GSZZL 数字口径为字符串,休市 Datas 为 null
+        do {
+            let withData = try JSONDecoder().decode(EastmoneyFundAPI.EstimateResponse.self, from: Data(#"{"Datas":{"GSZ":"0.5401","GSZZL":"1.20"}}"#.utf8))
+            checkEqual(withData.Datas?.GSZZL?.doubleValue ?? 0, 1.20, accuracy: 0.001, "估算涨跌幅")
+            checkEqual(withData.Datas?.GSZ?.doubleValue ?? 0, 0.5401, accuracy: 0.0001, "估算净值")
+            let empty = try JSONDecoder().decode(EastmoneyFundAPI.EstimateResponse.self, from: Data(#"{"Datas":null,"ErrCode":0}"#.utf8))
+            check(empty.Datas?.GSZZL == nil, "休市 Datas 为 null 兼容")
+        } catch {
+            check(false, "估值解析异常:\(error)")
+        }
+    }
+
     static func runAll() {
         holdingMathTests()
         eastmoneyDecodeTests()
@@ -259,6 +293,7 @@ enum TestRun {
         tradingDayTests()
         menuBarRendererTests()
         sparklineAndStageTests()
+        searchAndEstimateTests()
         alertTests()
         print("")
         if failureCount == 0 {

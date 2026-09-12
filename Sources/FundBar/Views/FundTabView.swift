@@ -16,9 +16,11 @@ struct FundTabView: View {
                     summaryBanner
                     headerRow
                     ForEach(store.holdings) { holding in
+                        let percentInfo = store.effectivePercent(for: holding.code)
                         FundRow(
                             holding: holding,
-                            dayPercent: store.dayPercent(for: holding.code)
+                            dayPercent: percentInfo?.percent,
+                            isEstimate: percentInfo?.isEstimate ?? false
                         ) {
                             onOpenDetail(holding.code)
                         }
@@ -52,7 +54,7 @@ struct FundTabView: View {
         var cost = 0.0
         var hasCost = false
         for holding in store.holdings {
-            let percent = store.dayPercent(for: holding.code) ?? 0
+            let percent = store.effectivePercent(for: holding.code)?.percent ?? 0
             amount += holding.amount
             dayPnl += Holding.dayPnl(amount: holding.amount, dayPercent: percent)
             if let holdingCost = holding.cost, holdingCost > 0 {
@@ -144,6 +146,7 @@ struct FundTabView: View {
 struct FundRow: View {
     let holding: Holding
     let dayPercent: Double?
+    var isEstimate = false
     let onOpen: () -> Void
     @State private var hovered = false
 
@@ -158,9 +161,20 @@ struct FundRow: View {
                     .fill(CnStyle.color(for: dayPercent).opacity(0.75))
                     .frame(width: 3, height: 26)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(holding.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(holding.name)
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1)
+                        if isEstimate {
+                            Text("估")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 1)
+                                .background(Color.orange.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+                    }
                     Text("\(holding.code) · 点击看走势")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)

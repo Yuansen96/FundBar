@@ -13,6 +13,9 @@ struct AddFundPage: View {
     @State private var fetchedDetail: FundDetail?
     @State private var isLoading = false
     @State private var errorText: String?
+    @State private var searchInput = ""
+    @State private var searchResults: [EastmoneyFundAPI.SearchHit] = []
+    @State private var isSearching = false
 
     init(editing: Holding?, onDone: @escaping () -> Void) {
         self.editing = editing
@@ -35,6 +38,46 @@ struct AddFundPage: View {
                 Text(editing == nil ? "添加基金" : "编辑基金")
                     .font(.system(size: 14, weight: .bold))
                 Spacer()
+            }
+
+            if editing == nil {
+                HStack(spacing: 8) {
+                    TextField("搜索基金:名称 / 简拼 / 代码", text: $searchInput)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(searchFunds)
+                    Button(action: searchFunds) {
+                        Text(isSearching ? "搜索中…" : "搜索")
+                    }
+                    .disabled(searchInput.trimmingCharacters(in: .whitespaces).isEmpty || isSearching)
+                }
+                ForEach(searchResults) { hit in
+                    Button {
+                        codeInput = hit.code
+                        searchResults = []
+                        fetchDetail()
+                    } label: {
+                        HStack {
+                            Text(hit.name)
+                                .font(.system(size: 12.5))
+                                .lineLimit(1)
+                            Spacer()
+                            Text(hit.code)
+                                .font(.system(size: 11).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 6)
+                        .background(Color.primary.opacity(0.03))
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                    }
+                    .buttonStyle(.plain)
+                }
+                if isSearching {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity)
+                }
             }
 
             Text("基金代码")
@@ -114,6 +157,16 @@ struct AddFundPage: View {
     private var parsedCost: Double? {
         guard let value = Double(costInput), value > 0 else { return nil }
         return value
+    }
+
+    private func searchFunds() {
+        let keyword = searchInput.trimmingCharacters(in: .whitespaces)
+        guard !keyword.isEmpty else { return }
+        isSearching = true
+        Task { @MainActor in
+            searchResults = (try? await EastmoneyFundAPI.shared.searchFunds(keyword: keyword)) ?? []
+            isSearching = false
+        }
     }
 
     private func fetchDetail() {
