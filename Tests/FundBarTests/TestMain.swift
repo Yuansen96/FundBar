@@ -194,6 +194,26 @@ enum TestRun {
         check(FundAlert.notifiedKey(code: "161725", date: "2026-09-11") == "fundbar.alert.2026-09-11.161725", "去重 key 格式")
     }
 
+    static func menuBarRendererTests() {
+        print("菜单栏摘要渲染:")
+        let quotes = [
+            IndexQuote(
+                def: IndexDef(name: "上证指数", shortName: "上证", secid: "1.000001", tencentCode: "sh000001", region: .cn),
+                price: 3888.11, change: -46.29, changePercent: -1.18, dataDate: "2026-09-11"
+            ),
+            IndexQuote(
+                def: IndexDef(name: "日经225", shortName: "日经", secid: "100.N225", tencentCode: nil, region: .asia),
+                price: nil, change: nil, changePercent: nil, dataDate: nil
+            ),
+        ]
+        let text = MenuBarSummaryRenderer.attributedText(for: quotes)
+        check(text.length > 0, "有涨跌数据时输出非空摘要")
+        check(text.string.contains("上证") && text.string.contains("-1.18%"), "包含名称与涨跌幅")
+        check(!text.string.contains("日经"), "无数据指数不进摘要")
+        let empty = MenuBarSummaryRenderer.attributedText(for: quotes.filter { $0.price == nil })
+        check(empty.length == 0, "全部无数据时输出空摘要")
+    }
+
     static func runAll() {
         holdingMathTests()
         eastmoneyDecodeTests()
@@ -202,6 +222,7 @@ enum TestRun {
         tencentParseTests()
         tencentDateTests()
         tradingDayTests()
+        menuBarRendererTests()
         alertTests()
         print("")
         if failureCount == 0 {

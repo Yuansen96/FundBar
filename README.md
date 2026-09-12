@@ -67,21 +67,26 @@ open FundBar.app     # 启动,菜单栏出现 📈 图标
 
 ```
 Sources/FundBar/
-├── FundBarApp.swift        # @main,MenuBarExtra 入口 + 状态项图标
-├── Models.swift            # 指数定义、行情模型、持仓与盈亏计算
+├── FundBarApp.swift        # @main,NSStatusItem + NSPopover 入口(状态项可实时刷新)
+├── Models.swift            # 指数定义、行情模型、持仓与盈亏计算、交易日推算
 ├── Services/
-│   ├── EastmoneyAPI.swift  # 指数行情 + 板块涨跌榜
+│   ├── EastmoneyAPI.swift  # 指数行情 + 板块涨跌榜(主源)
+│   ├── TencentAPI.swift    # 腾讯行情(降级源,GBK)
 │   ├── DanjuanAPI.swift    # 基金详情 + 历史净值
-│   └── MarketStore.swift   # 全局状态、定时刷新、持仓持久化
+│   ├── NotificationManager.swift # 涨跌提醒系统通知
+│   └── MarketStore.swift   # 全局状态、定时刷新、数据源降级、持仓持久化
 ├── Views/
-│   ├── PanelView.swift     # 主面板(三页签容器 + 页脚刷新)
-│   ├── MarketTabView.swift # 大盘(三地区九指数)
-│   ├── SectorTabView.swift # 板块双榜
-│   ├── FundTabView.swift   # 持仓列表 + 盈亏汇总
-│   ├── AddFundPage.swift   # 添加基金
+│   ├── PanelView.swift     # 主面板(三页签容器 + 三态状态页脚)
+│   ├── MarketTabView.swift # 大盘(三地区九指数 + 休市提示条)
+│   ├── SectorTabView.swift # 板块双榜(比例条)
+│   ├── FundTabView.swift   # 持仓列表 + 渐变盈亏横幅
+│   ├── AddFundPage.swift   # 添加/编辑基金
 │   ├── FundDetailPage.swift# 基金详情 + 走势图
-│   └── SettingsPage.swift  # 设置(菜单栏模式 / 指数 / 刷新间隔)
-└── Support/Helpers.swift   # 红涨绿跌配色 + 数字格式化
+│   └── SettingsPage.swift  # 设置(菜单栏模式/指数/数据源/刷新间隔/提醒)
+└── Support/
+    ├── HTTPClient.swift    # 共享 HTTP(UA/Referer/重试)+ 错误文案
+    ├── MenuBarSummaryRenderer.swift # 状态项彩色涨跌摘要(attributedTitle)
+    └── Helpers.swift       # 红涨绿跌配色 + 数字格式化
 ```
 
 ## Roadmap

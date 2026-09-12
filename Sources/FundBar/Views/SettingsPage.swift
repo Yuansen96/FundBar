@@ -32,7 +32,7 @@ struct SettingsPage: View {
                                 Text("仅图标").tag("icon")
                                 Text("图标 + 指数涨跌").tag("iconText")
                             }
-                            Text("系统状态栏只支持单色文字,红绿配色在面板内展示;展开面板可查看完整行情。")
+                            Text("摘要为彩色实时渲染(红涨绿跌);点击状态项展开面板可查看完整行情。")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -115,7 +115,7 @@ struct SettingsPage: View {
                             Text("关于 FundBar")
                                 .font(.callout)
                                 .fontWeight(.medium)
-                            Text("版本 0.4.0 · SwiftUI 原生 macOS 菜单栏基金行情工具")
+                            Text("版本 0.4.1 · SwiftUI 原生 macOS 菜单栏基金行情工具")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text("数据来源:东方财富、蛋卷基金公开接口(非官方,无可用性保证)。本项目仅供学习交流,不构成任何投资建议。")
