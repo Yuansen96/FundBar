@@ -71,7 +71,7 @@ image.unlockFocus()
 guard let tiff = image.tiffRepresentation,
       let rep = NSBitmapImageRep(data: tiff),
       let png = rep.representation(using: .png, properties: [:]) else {
-    fputs("图标渲染失败\n")
+    fputs("图标渲染失败\n", stderr)
     exit(1)
 }
 let output = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.png"
