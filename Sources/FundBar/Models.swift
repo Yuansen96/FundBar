@@ -300,6 +300,31 @@ struct SyncPayload: Codable {
     }
 }
 
+// MARK: - 刷新策略(防封禁)
+
+enum RefreshPolicy {
+    /// 间隔 <= 0 表示仅手动刷新
+    static func isScheduled(interval: Double) -> Bool {
+        interval > 0
+    }
+
+    /// 周末行情静止,跳过自动刷新(工作日夜间的美股时段仍会刷新)
+    static func autoRefreshAllowed(isWeekend: Bool) -> Bool {
+        !isWeekend
+    }
+
+    /// 连续失败后的退避倍数:首次失败保持 1x,之后 2x → 3x → 4x 封顶
+    static func backoffMultiplier(consecutiveFailures: Int) -> Double {
+        min(Double(max(consecutiveFailures, 1)), 4)
+    }
+
+    /// 下一次允许自动刷新的时间
+    static func nextAllowedAt(lastInterval: Double, consecutiveFailures: Int, from: Date) -> Date {
+        let base = max(lastInterval, 30)
+        return from.addingTimeInterval(base * backoffMultiplier(consecutiveFailures: consecutiveFailures))
+    }
+}
+
 // MARK: - 设置键
 
 enum SettingsKey {

@@ -31,14 +31,20 @@ final class MarketStore: ObservableObject {
     private var hasLoadedOnce = false
     private var sparklinesLoadedAt: Date?
     private var isLoadingSparklines = false
+    private var consecutiveFailures = 0
+    private var nextAllowedRefresh = Date.distantPast
+    private var isRefreshing = false
 
     private init() {
         startTimer()
     }
 
     var refreshInterval: TimeInterval {
-        let stored = UserDefaults.standard.double(forKey: SettingsKey.refreshInterval)
-        return stored > 0 ? stored : 60
+        // 从未设置过 → 默认 60 秒;显式设为 0 表示仅手动刷新
+        if UserDefaults.standard.object(forKey: SettingsKey.refreshInterval) == nil {
+            return 60
+        }
+        return UserDefaults.standard.double(forKey: SettingsKey.refreshInterval)
     }
 
     /// 用户在设置中选择的数据源模式
@@ -59,24 +65,34 @@ final class MarketStore: ObservableObject {
         return "今日休市,展示 \(TradingDay.string(tradingDay).dropFirst(5))(\(TradingDay.weekdayLabel(tradingDay)))收盘行情"
     }
 
-    /// 设置页修改刷新间隔后调用,重建定时器
+    /// 设置页修改刷新间隔后调用,重建定时器;间隔为 0(仅手动)时不创建定时器
     func startTimer() {
         timer?.invalidate()
-        let interval = refreshInterval
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+        timer = nil
+        guard RefreshPolicy.isScheduled(interval: refreshInterval) else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { _ in
             Task { @MainActor in
+                guard RefreshPolicy.autoRefreshAllowed(isWeekend: TradingDay.isWeekend()) else { return }
+                guard Date() >= MarketStore.shared.nextAllowedRefresh else { return }
                 await MarketStore.shared.refresh(showLoading: false)
             }
         }
     }
 
-    /// 面板首次打开时加载一次
+    /// 面板打开时加载一次;仅手动模式下数据超过 60 秒也会补一次
     func refreshIfNeeded() async {
-        guard !hasLoadedOnce else { return }
+        if hasLoadedOnce {
+            guard refreshInterval <= 0 else { return }
+            if let last = lastUpdated, Date().timeIntervalSince(last) < 60 { return }
+            await refresh(showLoading: false)
+            return
+        }
         await refresh(showLoading: true)
     }
 
     func refresh(showLoading: Bool) async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
         if showLoading { isLoading = true }
         defer { if showLoading { isLoading = false } }
 
@@ -85,6 +101,7 @@ final class MarketStore: ObservableObject {
         do {
             let result = try await fetchIndicesWithFallback()
             indices = result.quotes
+            consecutiveFailures = 0
             switch result.forcedMode ?? .auto {
             case .tencent:
                 dataSourceNote = "使用腾讯源(日经/KOSPI 暂缺)"
@@ -92,6 +109,13 @@ final class MarketStore: ObservableObject {
                 dataSourceNote = result.usedFallback ? "东财行情不可达,已切换腾讯备用源(日经/KOSPI 暂缺)" : nil
             }
         } catch {
+            // 连续失败按倍数退避(1x→4x 封顶),降低触发数据源风控的概率
+            consecutiveFailures += 1
+            nextAllowedRefresh = RefreshPolicy.nextAllowedAt(
+                lastInterval: max(refreshInterval, 30),
+                consecutiveFailures: consecutiveFailures,
+                from: Date()
+            )
             dataSourceNote = nil
             errorMessage = "行情获取失败:\(friendlyNetworkMessage(error))"
         }

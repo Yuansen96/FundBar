@@ -139,9 +139,20 @@ struct MarketFooterView: View {
                 Image(systemName: "arrow.clockwise")
             }
             .buttonStyle(.plain)
-            .help("立即刷新")
+            .help(refreshHelpText)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+    }
+
+    private var refreshHelpText: String {
+        if store.errorMessage != nil {
+            return "立即刷新(连续失败中,自动刷新已退避减速)"
+        }
+        if UserDefaults.standard.double(forKey: SettingsKey.refreshInterval) == 0,
+           UserDefaults.standard.object(forKey: SettingsKey.refreshInterval) != nil {
+            return "立即刷新(当前为仅手动模式)"
+        }
+        return "立即刷新"
     }
 }

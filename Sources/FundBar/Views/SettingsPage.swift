@@ -81,10 +81,15 @@ struct SettingsPage: View {
                                 Text("30 秒").tag(30.0)
                                 Text("1 分钟").tag(60.0)
                                 Text("5 分钟").tag(300.0)
+                                Text("仅手动刷新").tag(0.0)
                             }
                             .onChange(of: refreshInterval) {
                                 store.startTimer()
                             }
+                            Text("仅手动:打开面板时数据超过 1 分钟才补一次,其余靠点刷新按钮。周末自动跳过刷新;连续失败自动拉长间隔,降低被数据源限流的风险。")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(4)
                     }
@@ -180,7 +185,7 @@ struct SettingsPage: View {
                             Text("关于 FundBar")
                                 .font(.callout)
                                 .fontWeight(.medium)
-                            Text("版本 0.7.0 · SwiftUI 原生 macOS 菜单栏基金行情工具")
+                            Text("版本 0.8.0 · SwiftUI 原生 macOS 菜单栏基金行情工具")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text("数据来源:东方财富、蛋卷基金公开接口(非官方,无可用性保证)。本项目仅供学习交流,不构成任何投资建议。")

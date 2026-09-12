@@ -306,6 +306,22 @@ enum TestRun {
         }
     }
 
+    static func refreshPolicyTests() {
+        print("刷新策略:")
+        check(RefreshPolicy.isScheduled(interval: 60), "60s 为自动模式")
+        check(RefreshPolicy.isScheduled(interval: 300), "300s 为自动模式")
+        check(!RefreshPolicy.isScheduled(interval: 0), "0 为仅手动刷新")
+        check(RefreshPolicy.autoRefreshAllowed(isWeekend: false), "工作日允许自动刷新")
+        check(!RefreshPolicy.autoRefreshAllowed(isWeekend: true), "周末跳过自动刷新")
+        checkEqual(RefreshPolicy.backoffMultiplier(consecutiveFailures: 0), 1, accuracy: 0.001, "无失败 1x")
+        checkEqual(RefreshPolicy.backoffMultiplier(consecutiveFailures: 2), 2, accuracy: 0.001, "失败 2 次 2x")
+        checkEqual(RefreshPolicy.backoffMultiplier(consecutiveFailures: 9), 4, accuracy: 0.001, "退避 4x 封顶")
+        let next = RefreshPolicy.nextAllowedAt(lastInterval: 60, consecutiveFailures: 2, from: Date(timeIntervalSince1970: 1_000_000))
+        checkEqual(next.timeIntervalSince1970, 1_000_120, accuracy: 0.001, "退避间隔 = 60s × 2")
+        let nextFloor = RefreshPolicy.nextAllowedAt(lastInterval: 0, consecutiveFailures: 1, from: Date(timeIntervalSince1970: 1_000_000))
+        checkEqual(nextFloor.timeIntervalSince1970, 1_000_030, accuracy: 0.001, "手动模式失败退避按 30s 下限")
+    }
+
     static func runAll() {
         holdingMathTests()
         eastmoneyDecodeTests()
@@ -318,6 +334,7 @@ enum TestRun {
         sparklineAndStageTests()
         searchAndEstimateTests()
         syncPayloadTests()
+        refreshPolicyTests()
         alertTests()
         print("")
         if failureCount == 0 {
