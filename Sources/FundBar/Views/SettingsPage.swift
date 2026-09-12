@@ -6,6 +6,7 @@ struct SettingsPage: View {
     var onBack: () -> Void
 
     @State private var launchAtLoginError: String?
+    @State private var launchAtLoginOn = false
 
     @AppStorage(SettingsKey.menuBarMode) private var menuBarMode = "icon"
     @AppStorage(SettingsKey.menuBarCodes) private var codesRaw = "1.000001"
@@ -16,6 +17,23 @@ struct SettingsPage: View {
     @AppStorage(SettingsKey.icloudSyncEnabled) private var icloudSync = true
     @ObservedObject private var store = MarketStore.shared
     @ObservedObject private var sync = SyncService.shared
+
+    /// 登录项真实状态(等待系统批准也算已开启)
+    private static var loginItemEnabled: Bool {
+        switch SMAppService.mainApp.status {
+        case .enabled, .requiresApproval: return true
+        default: return false
+        }
+    }
+
+    private var launchAtLoginStatusText: String {
+        switch SMAppService.mainApp.status {
+        case .enabled: return "当前状态:已启用,登录后自动打开 FundBar"
+        case .requiresApproval: return "当前状态:已添加,等待系统批准"
+        case .notRegistered, .notFound: return "当前状态:未启用"
+        @unknown default: return "当前状态:未知"
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -153,24 +171,27 @@ struct SettingsPage: View {
 
                     GroupBox {
                         VStack(alignment: .leading, spacing: 8) {
-                            Toggle(
-                                "登录时自动启动",
-                                isOn: Binding(
-                                    get: { SMAppService.mainApp.status == .enabled },
-                                    set: { newValue in
-                                        launchAtLoginError = nil
-                                        do {
-                                            if newValue {
-                                                try SMAppService.mainApp.register()
-                                            } else {
-                                                try SMAppService.mainApp.unregister()
-                                            }
-                                        } catch {
-                                            launchAtLoginError = "设置失败:\(error.localizedDescription)"
+                            Toggle("登录时自动启动", isOn: $launchAtLoginOn)
+                                .onChange(of: launchAtLoginOn) {
+                                    launchAtLoginError = nil
+                                    do {
+                                        if launchAtLoginOn {
+                                            try SMAppService.mainApp.register()
+                                        } else {
+                                            try SMAppService.mainApp.unregister()
                                         }
+                                    } catch {
+                                        launchAtLoginError = "设置失败:\(error.localizedDescription)"
                                     }
-                                )
-                            )
+                                    // 注册状态由系统异步生效,稍后按真实状态校正开关
+                                    Task { @MainActor in
+                                        try? await Task.sleep(nanoseconds: 400_000_000)
+                                        launchAtLoginOn = Self.loginItemEnabled
+                                    }
+                                }
+                            Text(launchAtLoginStatusText)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
                             if let launchAtLoginError {
                                 Text(launchAtLoginError)
                                     .font(.caption2)
@@ -200,6 +221,7 @@ struct SettingsPage: View {
             Spacer()
         }
         .padding(14)
+        .onAppear { launchAtLoginOn = Self.loginItemEnabled }
     }
 
     private var selectedCodes: Set<String> {
