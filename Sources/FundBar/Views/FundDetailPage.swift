@@ -3,8 +3,12 @@ import Charts
 
 /// 基金详情:净值卡片、持仓盈亏卡片、可切换区间的净值走势图(Swift Charts)
 struct FundDetailPage: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let code: String
     var onBack: () -> Void
+    var previewHolding: Holding? = nil
+    var previewDetail: FundDetail? = nil
+    var previewHistory: [NavPoint]? = nil
 
     @ObservedObject private var store = MarketStore.shared
     @State private var detail: FundDetail?
@@ -60,7 +64,15 @@ struct FundDetailPage: View {
             Spacer()
         }
         .padding(14)
-        .task { await load() }
+        .task {
+            if let previewDetail, let previewHistory {
+                detail = previewDetail
+                history = previewHistory
+                isLoading = false
+            } else {
+                await load()
+            }
+        }
     }
 
     private func load() async {
@@ -82,7 +94,7 @@ struct FundDetailPage: View {
     // MARK: - 净值与持仓统计
 
     private var holding: Holding? {
-        store.holdings.first { $0.code == code }
+        previewHolding ?? store.holdings.first { $0.code == code }
     }
 
     /// Hero 区:大号净值 + 当日涨跌胶囊
@@ -91,7 +103,7 @@ struct FundDetailPage: View {
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(detail.unitNav.map { String(format: "%.4f", $0) } ?? "--")
                 .font(.system(size: 26, weight: .heavy, design: .rounded).monospacedDigit())
-                .contentTransition(.numericText())
+                .contentTransition(reduceMotion ? .identity : .numericText())
             Text("净值 · \(detail.navDate ?? "--")")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -99,7 +111,7 @@ struct FundDetailPage: View {
             Text(detail.dayChangePercent?.percentText ?? "--")
                 .font(.system(size: 14, weight: .bold).monospacedDigit())
                 .foregroundStyle(.white)
-                .contentTransition(.numericText())
+                .contentTransition(reduceMotion ? .identity : .numericText())
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .background(
@@ -116,13 +128,28 @@ struct FundDetailPage: View {
     }
 
     private var statsSection: some View {
-        let dayPercent = detail?.dayChangePercent
-        let dayPnl = holding.map { Holding.dayPnl(amount: $0.amount, dayPercent: dayPercent ?? 0) }
-        let totalPnl = holding.flatMap {
-            Holding.totalPnl(amount: $0.amount, dayPercent: dayPercent ?? 0, cost: $0.cost)
+        // 详情里的净值涨跌仍按其净值日期展示；“当日盈亏”只使用当日有效行情。
+        // 固定示例截图使用注入的预览数据，不读取本机账户的行情。
+        let dayPercent: Double? = {
+            if let previewDetail { return previewDetail.dayChangePercent }
+            if let fromStore = store.effectivePercent(for: code)?.percent { return fromStore }
+            guard let detail else { return nil }
+            return FundQuotePolicy.effectivePercent(
+                navDate: detail.navDate,
+                navPercent: detail.dayChangePercent,
+                estimateDate: nil,
+                estimatePercent: nil,
+                now: Date()
+            )?.percent
+        }()
+        let dayPnl = holding.flatMap { holding in
+            dayPercent.map { Holding.dayPnl(amount: holding.amount, dayPercent: $0) }
         }
-        let totalPercent = holding.flatMap {
-            Holding.totalPnlPercent(amount: $0.amount, dayPercent: dayPercent ?? 0, cost: $0.cost)
+        let totalPnl = holding.flatMap { holding in
+            dayPercent.flatMap { Holding.totalPnl(amount: holding.amount, dayPercent: $0, cost: holding.cost) }
+        }
+        let totalPercent = holding.flatMap { holding in
+            dayPercent.flatMap { Holding.totalPnlPercent(amount: holding.amount, dayPercent: $0, cost: holding.cost) }
         }
 
         return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
@@ -193,6 +220,10 @@ struct FundDetailPage: View {
 
     private var chartSection: some View {
         let points = Array(history.suffix(rangePoints))
+        let minNav = points.map(\.nav).min() ?? 0
+        let maxNav = points.map(\.nav).max() ?? 1
+        let padding = max((maxNav - minNav) * 0.12, maxNav * 0.005)
+        let lowerBound = max(0, minNav - padding)
         let periodPercent: Double? = {
             guard let first = points.first?.nav, let last = points.last?.nav, first != 0 else { return nil }
             return (last - first) / first * 100
@@ -225,7 +256,8 @@ struct FundDetailPage: View {
 
                     AreaMark(
                         x: .value("日期", point.dateValue ?? Date()),
-                        y: .value("净值", point.nav)
+                        yStart: .value("基线", lowerBound),
+                        yEnd: .value("净值", point.nav)
                     )
                     .foregroundStyle(
                         .linearGradient(
@@ -235,13 +267,15 @@ struct FundDetailPage: View {
                         )
                     )
                 }
+                .chartYScale(domain: lowerBound...max(maxNav + padding, lowerBound + 0.0001))
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 4))
                 }
                 .chartYAxis {
                     AxisMarks(position: .trailing, values: .automatic(desiredCount: 4))
                 }
-                .frame(height: 185)
+                .frame(height: 245)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: rangePoints)
             }
         }
     }

@@ -1,5 +1,28 @@
 import Foundation
 
+private struct FundFetchResult {
+    let code: String
+    let detail: FundDetail?
+    let estimate: EastmoneyFundAPI.EstimateQuote?
+}
+
+private enum FundQuoteLoader {
+    static func fetch(code: String) async -> FundFetchResult {
+        let detail = try? await DanjuanAPI.shared.fetchFundDetail(code: code)
+        return FundFetchResult(code: code, detail: detail, estimate: nil)
+    }
+}
+
+private enum MarketRefreshEvent {
+    case indices([IndexQuote], usedFallback: Bool, forcedMode: DataSourceMode?)
+    case indexFailure(Error)
+    case indexSkipped
+    case sectors(gainers: [SectorQuote], losers: [SectorQuote])
+    case sectorFailure(Error)
+    case sectorDisabled
+    case funds([FundFetchResult], estimateFailed: Bool)
+}
+
 /// 全局行情/持仓状态中心,由菜单栏面板与状态项图标共享。
 @MainActor
 final class MarketStore: ObservableObject {
@@ -12,11 +35,17 @@ final class MarketStore: ObservableObject {
     @Published private(set) var fundQuotes: [String: FundDetail] = [:]
     /// 持仓基金的盘中估算涨跌幅(key 为基金代码;休市/无数据时为空)
     @Published private(set) var fundEstimates: [String: Double] = [:]
+    /// 基金净值源最近一次成功拉取时间，与指数更新时间独立。
+    @Published private(set) var fundLastUpdated: Date?
+    /// 基金刷新结果，供页脚展示部分成功或失败。
+    @Published private(set) var fundStatusText: String?
+    /// 跨上海自然日时通知视图重新计算“今日盈亏”。
+    @Published private(set) var valuationDay = TradingDay.string(Date())
     /// 指数迷你走势(secid -> 最近 20 日收盘价),腾讯日线,10 分钟缓存
     @Published private(set) var sparklines: [String: [Double]] = [:]
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var isLoading = false
-    /// 致命错误:所有数据源都失败
+    /// 指数源错误；板块与基金各自独立刷新并报告状态。
     @Published private(set) var errorMessage: String?
     /// 降级提示:东财不可达已切换腾讯源(黄色状态)
     @Published private(set) var dataSourceNote: String?
@@ -28,17 +57,21 @@ final class MarketStore: ObservableObject {
     }
 
     private var timer: Timer?
+    private var dayRolloverTimer: Timer?
     private var hasLoadedOnce = false
     private var sparklinesLoadedAt: Date?
     private var isLoadingSparklines = false
     private var consecutiveFailures = 0
     private var nextAllowedRefresh = Date.distantPast
     private var isRefreshing = false
+    private var refreshGeneration: UInt64 = 0
     private var eastMoneyConsecutiveFailures = 0
     private var eastMoneyLastFailureAt: Date?
+    private var fundEstimateQuotes: [String: EastmoneyFundAPI.EstimateQuote] = [:]
 
     private init() {
         startTimer()
+        scheduleDayRollover()
     }
 
     var refreshInterval: TimeInterval {
@@ -56,6 +89,7 @@ final class MarketStore: ObservableObject {
 
     /// 设置页切换数据源后调用,立即按新模式刷新
     func applyDataSourceSetting() {
+        nextAllowedRefresh = .distantPast
         Task { await refresh(showLoading: false) }
     }
 
@@ -74,15 +108,43 @@ final class MarketStore: ObservableObject {
         guard RefreshPolicy.isScheduled(interval: refreshInterval) else { return }
         timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { _ in
             Task { @MainActor in
+                MarketStore.shared.rolloverFundDayIfNeeded()
                 guard RefreshPolicy.autoRefreshAllowed(isWeekend: TradingDay.isWeekend()) else { return }
-                guard Date() >= MarketStore.shared.nextAllowedRefresh else { return }
                 await MarketStore.shared.refresh(showLoading: false)
             }
         }
     }
 
+    private func scheduleDayRollover() {
+        dayRolloverTimer?.invalidate()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
+        guard let nextMidnight = calendar.nextDate(
+            after: Date(),
+            matching: DateComponents(hour: 0, minute: 0, second: 0),
+            matchingPolicy: .nextTime
+        ) else { return }
+        let timer = Timer(fire: nextMidnight, interval: 0, repeats: false) { _ in
+            Task { @MainActor in
+                MarketStore.shared.rolloverFundDayIfNeeded()
+                MarketStore.shared.scheduleDayRollover()
+            }
+        }
+        dayRolloverTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func rolloverFundDayIfNeeded() {
+        let today = TradingDay.string(Date())
+        guard valuationDay != today else { return }
+        valuationDay = today
+        fundEstimateQuotes = fundEstimateQuotes.filter { $0.value.dataDate == today }
+        fundEstimates = fundEstimateQuotes.mapValues(\.percent)
+    }
+
     /// 面板打开时加载一次;仅手动模式下数据超过 60 秒也会补一次
     func refreshIfNeeded() async {
+        rolloverFundDayIfNeeded()
         if hasLoadedOnce {
             guard refreshInterval <= 0 else { return }
             if let last = lastUpdated, Date().timeIntervalSince(last) < 60 { return }
@@ -95,71 +157,135 @@ final class MarketStore: ObservableObject {
     func refresh(showLoading: Bool) async {
         guard !isRefreshing else { return }
         isRefreshing = true
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
+        rolloverFundDayIfNeeded()
         if showLoading { isLoading = true }
-        // 看门狗:90 秒后强制解除刷新锁,防止极端挂起导致刷新按钮永久失效
+        // 看门狗解除极端挂起；generation 阻止旧请求随后覆盖新一轮结果。
         let watchdog = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 90_000_000_000)
-            isRefreshing = false
-        }
-        defer {
-            watchdog.cancel()
+            do { try await Task.sleep(nanoseconds: 90_000_000_000) }
+            catch { return }
+            guard refreshGeneration == generation else { return }
+            refreshGeneration &+= 1
             isRefreshing = false
             if showLoading { isLoading = false }
         }
+        defer {
+            watchdog.cancel()
+            if refreshGeneration == generation {
+                isRefreshing = false
+                if showLoading { isLoading = false }
+            }
+        }
 
-        // 指数:按数据源设置获取(auto 模式东财 -> 腾讯 降级链)
-        var indices: [IndexQuote]?
+        // 三组数据同时刷新，各自完成时立即更新。指数退避只跳过指数，不拖住基金。
+        let shouldFetchIndices = showLoading || Date() >= nextAllowedRefresh
+        let codes = Array(Set(holdings.map(\.code))).sorted()
+        var indicesUpdated = false
+        await withTaskGroup(of: MarketRefreshEvent.self) { group in
+            group.addTask { await self.fetchIndexEvent(shouldFetch: shouldFetchIndices) }
+            group.addTask { await self.fetchSectorEvent() }
+            group.addTask { await self.fetchFundEvent(codes: codes) }
+            for await event in group {
+                guard refreshGeneration == generation else {
+                    group.cancelAll()
+                    break
+                }
+                switch event {
+                case let .indices(quotes, usedFallback, forcedMode):
+                    indexQuotes = quotes
+                    lastUpdated = Date()
+                    errorMessage = nil
+                    consecutiveFailures = 0
+                    nextAllowedRefresh = .distantPast
+                    indicesUpdated = true
+                    switch forcedMode ?? .auto {
+                    case .tencent:
+                        dataSourceNote = "使用腾讯源(日经/KOSPI 暂缺)"
+                    case .eastmoney, .auto:
+                        dataSourceNote = usedFallback ? "东财行情不可达,已切换腾讯备用源(日经/KOSPI 暂缺)" : nil
+                    }
+                case let .indexFailure(error):
+                    consecutiveFailures += 1
+                    nextAllowedRefresh = RefreshPolicy.nextAllowedAt(
+                        lastInterval: max(refreshInterval, 30),
+                        consecutiveFailures: consecutiveFailures,
+                        from: Date()
+                    )
+                    dataSourceNote = nil
+                    errorMessage = "指数获取失败:\(friendlyNetworkMessage(error))"
+                case .indexSkipped:
+                    break
+                case let .sectors(gainers, losers):
+                    sectorGainers = gainers
+                    sectorLosers = losers
+                    sectorError = nil
+                case let .sectorFailure(error):
+                    sectorGainers = []
+                    sectorLosers = []
+                    sectorError = "板块榜暂不可用:\(friendlyNetworkMessage(error))"
+                case .sectorDisabled:
+                    sectorGainers = []
+                    sectorLosers = []
+                    sectorError = "板块榜仅东财源提供,当前数据源为腾讯"
+                case let .funds(results, estimateFailed):
+                    applyFundResults(results, total: codes.count, estimateFailed: estimateFailed)
+                    checkAlerts()
+                }
+            }
+        }
+        guard refreshGeneration == generation else { return }
+        hasLoadedOnce = true
+        if indicesUpdated {
+            await loadSparklinesIfNeeded(generation: generation)
+        }
+    }
+
+    private func fetchIndexEvent(shouldFetch: Bool) async -> MarketRefreshEvent {
+        guard shouldFetch else { return .indexSkipped }
         do {
             let result = try await fetchIndicesWithFallback()
-            indices = result.quotes
-            consecutiveFailures = 0
-            switch result.forcedMode ?? .auto {
-            case .tencent:
-                dataSourceNote = "使用腾讯源(日经/KOSPI 暂缺)"
-            case .eastmoney, .auto:
-                dataSourceNote = result.usedFallback ? "东财行情不可达,已切换腾讯备用源(日经/KOSPI 暂缺)" : nil
-            }
+            return .indices(result.quotes, usedFallback: result.usedFallback, forcedMode: result.forcedMode)
         } catch {
-            // 连续失败按倍数退避(1x→4x 封顶),降低触发数据源风控的概率
-            consecutiveFailures += 1
-            nextAllowedRefresh = RefreshPolicy.nextAllowedAt(
-                lastInterval: max(refreshInterval, 30),
-                consecutiveFailures: consecutiveFailures,
-                from: Date()
-            )
-            dataSourceNote = nil
-            errorMessage = "行情获取失败:\(friendlyNetworkMessage(error))"
+            return .indexFailure(error)
         }
+    }
 
-        // 板块榜:仅东财提供,失败/腾讯模式不阻塞指数展示
-        if dataSourceMode == .tencent {
-            sectorGainers = []
-            sectorLosers = []
-            sectorError = "板块榜仅东财源提供,当前数据源为腾讯"
-        } else {
-            do {
-                async let gainersTask = EastmoneyAPI.shared.fetchSectorRank(ascending: false, count: 8)
-                async let losersTask = EastmoneyAPI.shared.fetchSectorRank(ascending: true, count: 8)
-                let (gainers, losers) = try await (gainersTask, losersTask)
-                sectorGainers = gainers
-                sectorLosers = losers
-                sectorError = dataSourceNote == nil ? nil : "板块榜由东财源提供,当前处于腾讯降级源"
-            } catch {
-                sectorGainers = []
-                sectorLosers = []
-                sectorError = dataSourceNote == nil ? "板块榜暂不可用:\(friendlyNetworkMessage(error))" : nil
+    private func fetchSectorEvent() async -> MarketRefreshEvent {
+        guard dataSourceMode != .tencent else { return .sectorDisabled }
+        do {
+            async let gainers = EastmoneyAPI.shared.fetchSectorRank(ascending: false, count: 8)
+            async let losers = EastmoneyAPI.shared.fetchSectorRank(ascending: true, count: 8)
+            return .sectors(gainers: try await gainers, losers: try await losers)
+        } catch {
+            return .sectorFailure(error)
+        }
+    }
+
+    private func fetchFundEvent(codes: [String]) async -> MarketRefreshEvent {
+        guard !codes.isEmpty, !Task.isCancelled else { return .funds([], estimateFailed: false) }
+        async let estimatesTask = EastmoneyFundAPI.shared.fetchEstimateBatches(codes: codes)
+        var results: [FundFetchResult] = []
+        var remaining = codes.makeIterator()
+        await withTaskGroup(of: FundFetchResult.self) { group in
+            // 净值同时最多请求 4 只；估值由独立批量请求并行获取。
+            for _ in 0..<min(4, codes.count) {
+                if let code = remaining.next() {
+                    group.addTask { await FundQuoteLoader.fetch(code: code) }
+                }
+            }
+            for await result in group {
+                results.append(result)
+                if !Task.isCancelled, let code = remaining.next() {
+                    group.addTask { await FundQuoteLoader.fetch(code: code) }
+                }
             }
         }
-
-        if let indices {
-            indexQuotes = indices
-            lastUpdated = Date()
-            errorMessage = nil
-            hasLoadedOnce = true
-            await refreshFundQuotes()
-            checkAlerts()
-            await loadSparklinesIfNeeded()
+        let estimates = await estimatesTask
+        let combined = results.map {
+            FundFetchResult(code: $0.code, detail: $0.detail, estimate: estimates.quotes[$0.code])
         }
+        return .funds(combined, estimateFailed: estimates.failedBatchCount > 0)
     }
 
     /// 数据源状态明细(页脚悬停提示)
@@ -180,12 +306,15 @@ final class MarketStore: ObservableObject {
         } else {
             parts.append("板块:东财")
         }
-        parts.append("基金:蛋卷")
+        parts.append(fundStatusText ?? "基金:蛋卷")
+        if let fundLastUpdated {
+            parts.append("基金更新:\(fundLastUpdated.formatted(.dateTime.hour().minute()))")
+        }
         return parts.joined(separator: " · ")
     }
 
     /// 迷你走势 10 分钟缓存,过期后从腾讯日线接口并发拉取
-    private func loadSparklinesIfNeeded() async {
+    private func loadSparklinesIfNeeded(generation: UInt64) async {
         guard !isLoadingSparklines else { return }
         if let loaded = sparklinesLoadedAt, Date().timeIntervalSince(loaded) < 600 { return }
         isLoadingSparklines = true
@@ -205,7 +334,7 @@ final class MarketStore: ObservableObject {
                 if let pair { result[pair.0] = pair.1 }
             }
         }
-        if !result.isEmpty {
+        if !result.isEmpty, refreshGeneration == generation {
             sparklines = result
             sparklinesLoadedAt = Date()
         }
@@ -278,39 +407,60 @@ final class MarketStore: ObservableObject {
         }
     }
 
-    /// 某只基金的当日涨跌幅(净值口径)
+    /// 某只基金可用于“今日”统计的涨跌幅。
     func dayPercent(for code: String) -> Double? {
-        fundQuotes[code]?.dayChangePercent
+        effectivePercent(for: code)?.percent
     }
 
-    /// 展示与盈亏计算口径:盘中优先用估算值,闭市回落到净值涨跌
+    /// 展示、盈亏、提醒共用口径：仅接受有上海当日日期的源数据。
     func effectivePercent(for code: String) -> (percent: Double, isEstimate: Bool)? {
-        if let estimate = fundEstimates[code] {
-            return (estimate, true)
-        }
-        if let navPercent = fundQuotes[code]?.dayChangePercent {
-            return (navPercent, false)
-        }
-        return nil
+        let detail = fundQuotes[code]
+        let estimate = fundEstimateQuotes[code]
+        guard let result = FundQuotePolicy.effectivePercent(
+            navDate: detail?.navDate,
+            navPercent: detail?.dayChangePercent,
+            estimateDate: estimate?.dataDate,
+            estimatePercent: estimate?.percent
+        ) else { return nil }
+        return (result.percent, result.isEstimate)
     }
 
     func fundDetail(for code: String) -> FundDetail? {
         fundQuotes[code]
     }
 
-    /// 拉取所有持仓基金的当日净值(蛋卷)与盘中估值(东财)
-    private func refreshFundQuotes() async {
+    private func applyFundResults(_ results: [FundFetchResult], total: Int, estimateFailed: Bool) {
         var updated = fundQuotes
-        var updatedEstimates = fundEstimates
-        for holding in holdings {
-            if let detail = try? await DanjuanAPI.shared.fetchFundDetail(code: holding.code) {
-                updated[holding.code] = detail
+        var estimates: [String: EastmoneyFundAPI.EstimateQuote] = [:]
+        let today = TradingDay.string(Date())
+        var updatedCount = 0
+        for result in results {
+            if let detail = result.detail {
+                updated[result.code] = detail
+                updatedCount += 1
             }
-            // 休市时接口返回空,置 nil 回落净值口径
-            updatedEstimates[holding.code] = try? await EastmoneyFundAPI.shared.fetchEstimate(code: holding.code)
+            if let estimate = result.estimate, estimate.dataDate == today {
+                estimates[result.code] = estimate
+            }
         }
         fundQuotes = updated
-        fundEstimates = updatedEstimates
+        // 每次重新构建估值快照；接口失败后不能沿用上次盘中的估值。
+        fundEstimateQuotes = estimates
+        fundEstimates = estimates.mapValues(\.percent)
+        if updatedCount > 0 { fundLastUpdated = Date() }
+        let usableToday = results.filter { effectivePercent(for: $0.code) != nil }.count
+        if total == 0 {
+            fundStatusText = nil
+        } else if updatedCount == total {
+            fundStatusText = "基金已更新 \(updatedCount)/\(total),今日涨跌可用 \(usableToday)/\(total)"
+        } else if updatedCount > 0 {
+            fundStatusText = "基金已更新 \(updatedCount)/\(total),今日涨跌可用 \(usableToday)/\(total)"
+        } else {
+            fundStatusText = "基金净值获取失败,今日涨跌可用 \(usableToday)/\(total)"
+        }
+        if estimateFailed, total > 0 {
+            fundStatusText = (fundStatusText ?? "基金") + " · 盘中估值请求有失败"
+        }
     }
 
     // MARK: - 涨跌提醒
@@ -322,9 +472,13 @@ final class MarketStore: ObservableObject {
         if threshold <= 0 { threshold = 2.0 }
         let today = NotificationManager.todayString()
         var notified = Set(UserDefaults.standard.stringArray(forKey: SettingsKey.alertNotified) ?? [])
+        var percents: [String: Double] = [:]
+        for holding in holdings {
+            percents[holding.code] = effectivePercent(for: holding.code)?.percent
+        }
         let found = FundAlert.candidates(
             holdings: holdings,
-            quotes: fundQuotes,
+            percents: percents,
             threshold: threshold,
             notifiedKeys: notified,
             today: today
@@ -353,6 +507,7 @@ final class MarketStore: ObservableObject {
         holdings.removeAll { $0.code == code }
         fundQuotes[code] = nil
         fundEstimates[code] = nil
+        fundEstimateQuotes[code] = nil
     }
 
     /// iCloud 同步整包应用(远端覆盖本地)

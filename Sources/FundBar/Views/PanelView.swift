@@ -3,6 +3,10 @@ import SwiftUI
 /// 点开菜单栏图标后的主面板:大盘 / 板块 / 我的基金 三个页签,
 /// 毛玻璃材质背景;添加/编辑基金和详情以子页面方式呈现。
 struct PanelView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var previewIndices: [IndexQuote]? = nil
+    var previewSparklines: [String: [Double]] = [:]
+    var previewNotice: String? = nil
     private enum Page: Equatable {
         case tabs
         case addFund
@@ -31,7 +35,10 @@ struct PanelView: View {
         }
         .frame(width: 460)
         .background(.regularMaterial)
-        .task { await MarketStore.shared.refreshIfNeeded() }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: page)
+        .task {
+            if previewIndices == nil { await MarketStore.shared.refreshIfNeeded() }
+        }
     }
 
     @ViewBuilder
@@ -72,7 +79,7 @@ struct PanelView: View {
             Group {
                 switch tab {
                 case 0:
-                    MarketTabView()
+                    MarketTabView(previewIndices: previewIndices, previewSparklines: previewSparklines, previewNotice: previewNotice)
                 case 1:
                     SectorTabView()
                 default:
@@ -83,11 +90,13 @@ struct PanelView: View {
                     )
                 }
             }
+            .id(tab)
+            .transition(.opacity)
             .frame(minHeight: 430, maxHeight: 560)
-            .animation(.easeInOut(duration: 0.16), value: tab)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: tab)
 
             Divider()
-            MarketFooterView()
+            MarketFooterView(preview: previewIndices != nil)
         }
     }
 }
@@ -95,8 +104,10 @@ struct PanelView: View {
 /// 面板底部:状态点 + 三态信息(错误 / 降级 / 正常)+ 手动刷新
 struct MarketFooterView: View {
     @ObservedObject private var store = MarketStore.shared
+    var preview = false
 
     private var dotColor: Color {
+        if preview { return .green }
         if store.errorMessage != nil { return .red }
         if store.dataSourceNote != nil { return .yellow }
         return store.lastUpdated != nil ? .green : .gray
@@ -107,7 +118,11 @@ struct MarketFooterView: View {
             Circle()
                 .fill(dotColor)
                 .frame(width: 6, height: 6)
-            if let error = store.errorMessage {
+            if preview {
+                Text("示例数据 · 界面预览")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else if let error = store.errorMessage {
                 Text(error)
                     .font(.caption2)
                     .foregroundStyle(.red)
@@ -133,13 +148,15 @@ struct MarketFooterView: View {
                 ProgressView()
                     .controlSize(.small)
             }
-            Button {
-                Task { await store.refresh(showLoading: true) }
-            } label: {
-                Image(systemName: "arrow.clockwise")
+            if !preview {
+                Button {
+                    Task { await store.refresh(showLoading: true) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.plain)
+                .help(refreshHelpText)
             }
-            .buttonStyle(.plain)
-            .help(refreshHelpText)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

@@ -32,6 +32,23 @@ enum TestRun {
         checkEqual(Holding.totalPnlPercent(amount: 10000, dayPercent: -1.51, cost: 11820) ?? 0, -16.67, accuracy: 0.01, "持有收益率")
         check(Holding.totalPnl(amount: 10000, dayPercent: 0, cost: nil) == nil, "未填成本时无持有收益")
         check(Holding.totalPnl(amount: 10000, dayPercent: 0, cost: 0) == nil, "成本为 0 时无持有收益")
+        let holdings = [
+            Holding(code: "A", name: "A", amount: 10000, cost: 9000),
+            Holding(code: "B", name: "B", amount: 5000, cost: nil),
+        ]
+        let missingQuote = PortfolioSummary(holdings: holdings, percents: ["A": 2])
+        checkEqual(missingQuote.amount, 15000, accuracy: 0.01, "缺行情时仍显示持仓金额")
+        check(missingQuote.dayPnl == nil && missingQuote.missingQuoteCount == 1, "缺行情时不显示误导性的当日盈亏")
+        let missingCost = PortfolioSummary(holdings: holdings, percents: ["A": 2, "B": -1])
+        checkEqual(missingCost.dayPnl ?? 0, 150, accuracy: 0.01, "行情齐全时汇总当日盈亏")
+        check(missingCost.totalPnl == nil && missingCost.missingCostCount == 1, "成本不齐时不混算持有收益")
+        let complete = PortfolioSummary(
+            holdings: [holdings[0], Holding(code: "B", name: "B", amount: 5000, cost: 4500)],
+            percents: ["A": 2, "B": -1]
+        )
+        checkEqual(complete.totalPnl ?? 0, 1650, accuracy: 0.01, "成本齐全时计算持有收益")
+        checkEqual(complete.totalPnlPercent ?? 0, 1650 / 13500 * 100, accuracy: 0.01, "成本齐全时计算收益率")
+        check((-151.0).yuanText.hasPrefix("-¥"), "负金额符号显示在人民币符号前")
     }
 
     // MARK: - 接口解码(样本来自 2026-09-11 实测返回)
@@ -175,23 +192,42 @@ enum TestRun {
             Holding(code: "161725", name: "招商中证白酒A", amount: 10000, cost: nil),
             Holding(code: "000217", name: "华安黄金C", amount: 36000, cost: nil),
         ]
-        let quotes = [
-            "161725": FundDetail(code: "161725", name: "招商中证白酒A", unitNav: 0.5337, navDate: "2026-09-11", dayChangePercent: -2.15),
-            "000217": FundDetail(code: "000217", name: "华安黄金C", unitNav: 5.11, navDate: "2026-09-11", dayChangePercent: 0.42),
-        ]
-        let found = FundAlert.candidates(holdings: holdings, quotes: quotes, threshold: 2.0, notifiedKeys: [], today: "2026-09-11")
+        let percents = ["161725": -2.15, "000217": 0.42]
+        let found = FundAlert.candidates(holdings: holdings, percents: percents, threshold: 2.0, notifiedKeys: [], today: "2026-09-11")
         check(found.count == 1 && found.first?.code == "161725", "仅越过阈值的基金进入提醒(-2.15% 越过 ±2%,0.42% 不触发)")
         let again = FundAlert.candidates(
-            holdings: holdings, quotes: quotes, threshold: 2.0,
+            holdings: holdings, percents: percents, threshold: 2.0,
             notifiedKeys: [FundAlert.notifiedKey(code: "161725", date: "2026-09-11")],
             today: "2026-09-11"
         )
         check(again.isEmpty, "当天已提醒过不再重复提醒")
-        let thresholdZero = FundAlert.candidates(holdings: holdings, quotes: quotes, threshold: 0, notifiedKeys: [], today: "2026-09-11")
+        let thresholdZero = FundAlert.candidates(holdings: holdings, percents: percents, threshold: 0, notifiedKeys: [], today: "2026-09-11")
         check(thresholdZero.isEmpty, "阈值为 0 不触发任何提醒")
-        let positive = FundAlert.candidates(holdings: holdings, quotes: quotes, threshold: 2.0, notifiedKeys: [], today: "2026-09-12")
+        let positive = FundAlert.candidates(holdings: holdings, percents: percents, threshold: 2.0, notifiedKeys: [], today: "2026-09-12")
         check(positive.count == 1, "跨天后重新提醒")
+        check(FundAlert.candidates(holdings: holdings, percents: [:], threshold: 2.0, notifiedKeys: [], today: "2026-09-12").isEmpty, "无有效当日行情时不提醒")
+        check(FundAlert.candidates(holdings: holdings, percents: ["161725": .nan], threshold: 2.0, notifiedKeys: [], today: "2026-09-12").isEmpty, "异常涨跌幅不提醒")
         check(FundAlert.notifiedKey(code: "161725", date: "2026-09-11") == "fundbar.alert.2026-09-11.161725", "去重 key 格式")
+    }
+
+    static func holdingSortingTests() {
+        print("持仓排序:")
+        let holdings = [
+            Holding(code: "A", name: "A", amount: 1000, cost: 800),
+            Holding(code: "B", name: "B", amount: 2000, cost: nil),
+            Holding(code: "C", name: "C", amount: 1500, cost: 1000),
+            Holding(code: "D", name: "D", amount: 1000, cost: 800),
+        ]
+        let percents = ["A": 2.0, "B": -1.0, "D": 2.0]
+        func codes(_ order: HoldingSortOrder, _ values: [String: Double] = percents) -> [String] {
+            HoldingSorting.sorted(holdings, by: order, percents: values).map(\.code)
+        }
+        check(codes(.original) == ["A", "B", "C", "D"], "默认保持保存顺序")
+        check(codes(.dayPercent) == ["A", "D", "B", "C"], "按涨跌幅排序，缺行情置底且同值稳定")
+        check(codes(.dayPnl) == ["A", "D", "B", "C"], "按当日盈亏排序")
+        check(codes(.amount) == ["B", "C", "A", "D"], "按持有金额排序")
+        check(codes(.totalPnl) == ["A", "D", "B", "C"], "按持有收益排序，缺成本置底")
+        check(codes(.dayPercent, ["A": .nan, "B": -1.0, "D": 2.0]) == ["D", "B", "A", "C"], "异常涨跌幅按缺行情处理")
     }
 
     static func menuBarRendererTests() {
@@ -271,16 +307,32 @@ enum TestRun {
             check(false, "搜索解析异常:\(error)")
         }
 
-        // 估值样本:GSZZL 数字口径为字符串,休市 Datas 为 null
+        // 新批量估值样本：有的基金字段为空，历史日期不能充作今日估值。
         do {
-            let withData = try JSONDecoder().decode(EastmoneyFundAPI.EstimateResponse.self, from: Data(#"{"Datas":{"GSZ":"0.5401","GSZZL":"1.20"}}"#.utf8))
-            checkEqual(withData.Datas?.GSZZL?.doubleValue ?? 0, 1.20, accuracy: 0.001, "估算涨跌幅")
-            checkEqual(withData.Datas?.GSZ?.doubleValue ?? 0, 0.5401, accuracy: 0.0001, "估算净值")
-            let empty = try JSONDecoder().decode(EastmoneyFundAPI.EstimateResponse.self, from: Data(#"{"Datas":null,"ErrCode":0}"#.utf8))
-            check(empty.Datas?.GSZZL == nil, "休市 Datas 为 null 兼容")
+            let sample = #"{"data":[{"FCODE":"161725","GSZZL":2.87,"GZTIME":"2026-09-30 15:00"},{"FCODE":"110022","GSZZL":null,"GZTIME":null}],"errorCode":0,"success":true}"#
+            let response = try JSONDecoder().decode(EastmoneyFundAPI.ValuationResponse.self, from: Data(sample.utf8))
+            check(response.success == true && response.errorCode == 0, "批量估值响应状态")
+            check(response.data?.count == 2, "批量估值两只基金")
+            checkEqual(response.data?.first?.GSZZL?.doubleValue ?? 0, 2.87, accuracy: 0.001, "数字估值涨跌幅解析")
+            check(FundQuotePolicy.sourceDay(response.data?.first?.GZTIME?.text) == "2026-09-30", "估值源时间提取日期")
+            check(response.data?.last?.GSZZL == nil && response.data?.last?.GZTIME == nil, "空估值字段安全忽略")
         } catch {
             check(false, "估值解析异常:\(error)")
         }
+    }
+
+    static func fundQuoteFreshnessTests() {
+        print("基金行情时效:")
+        let friday = TradingDay.date(from: "2026-09-11")!
+        let saturday = TradingDay.date(from: "2026-09-12")!
+        check(FundQuotePolicy.sourceDay("2026-02-30 12:00") == nil, "无效源日期拒绝")
+        check(FundQuotePolicy.sourceDay(nil) == nil, "缺少源日期拒绝")
+        check(FundQuotePolicy.effectivePercent(navDate: "2026-09-11", navPercent: -2, estimateDate: nil, estimatePercent: nil, now: friday)?.percent == -2, "当日净值可参与今日盈亏")
+        check(FundQuotePolicy.effectivePercent(navDate: "2026-09-10", navPercent: -2, estimateDate: nil, estimatePercent: nil, now: friday) == nil, "前日净值不参与今日盈亏")
+        check(FundQuotePolicy.effectivePercent(navDate: "2026-09-11", navPercent: -2, estimateDate: "2026-09-11", estimatePercent: 1.5, now: friday) == .init(percent: 1.5, isEstimate: true), "当日估值优先于当日净值")
+        check(FundQuotePolicy.effectivePercent(navDate: "2026-09-11", navPercent: -2, estimateDate: "2026-09-10", estimatePercent: 1.5, now: friday) == .init(percent: -2, isEstimate: false), "旧估值回退到当日净值")
+        check(FundQuotePolicy.effectivePercent(navDate: "2026-09-11", navPercent: -2, estimateDate: nil, estimatePercent: nil, now: saturday) == nil, "周末不把周五涨跌当作今日涨跌")
+        check(FundQuotePolicy.effectivePercent(navDate: "2026-09-11", navPercent: .nan, estimateDate: nil, estimatePercent: nil, now: friday) == nil, "异常百分比不参与统计")
     }
 
     static func syncPayloadTests() {
@@ -342,6 +394,26 @@ enum TestRun {
         check(!RefreshPolicy.eastMoneyInCooldown(consecutiveFailures: 2, lastFailureAt: now.addingTimeInterval(-301), now: now), "冷却期(5 分钟)过后重新试探")
     }
 
+    static func syncConflictTests() {
+        print("iCloud 同步冲突判定:")
+        let original = SyncPayload.build(from: [Holding(code: "A", name: "A", amount: 1000, cost: nil)])
+        var local = original
+        local.holdings[0].amount = 1200
+        var remote = original
+        remote.holdings[0].amount = 1300
+        remote.updatedAt = original.updatedAt.addingTimeInterval(1)
+        check(SyncConflictPolicy.decide(local: original, remote: original, baseline: original) == .unchanged, "双方内容相同无需写回")
+        check(SyncConflictPolicy.decide(local: local, remote: original, baseline: original) == .pushLocal, "仅本机修改可推送")
+        check(SyncConflictPolicy.decide(local: original, remote: remote, baseline: original) == .applyRemote, "仅云端修改可拉取")
+        check(SyncConflictPolicy.decide(local: local, remote: remote, baseline: original) == .conflict, "双方修改时保留两份并暂停")
+        check(SyncConflictPolicy.decide(local: local, remote: original, baseline: nil) == .conflict, "旧版首次同步有差异时暂停并保留两份")
+        check(SyncConflictPolicy.decide(local: local, remote: nil, baseline: nil) == .pushLocal, "全新安装可创建云端文件")
+        check(SyncConflictPolicy.decide(local: local, remote: nil, baseline: original) == .conflict, "已同步文件消失时不盲目重建")
+        var rolledBack = remote
+        rolledBack.updatedAt = original.updatedAt.addingTimeInterval(-1)
+        check(SyncConflictPolicy.decide(local: original, remote: rolledBack, baseline: original) == .conflict, "云端旧时间戳变化需人工确认")
+    }
+
     static func runAll() {
         holdingMathTests()
         eastmoneyDecodeTests()
@@ -353,10 +425,13 @@ enum TestRun {
         menuBarRendererTests()
         sparklineAndStageTests()
         searchAndEstimateTests()
+        fundQuoteFreshnessTests()
         syncPayloadTests()
         refreshPolicyTests()
         syncLoopGuardTests()
+        syncConflictTests()
         alertTests()
+        holdingSortingTests()
         print("")
         if failureCount == 0 {
             print("全部 \(checkCount) 项检查通过 ✅")

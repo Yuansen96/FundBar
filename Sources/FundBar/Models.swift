@@ -206,6 +206,43 @@ struct Holding: Identifiable, Codable, Hashable {
     }
 }
 
+/// 汇总只在全部持仓有行情时给出完整盈亏；成本不完整时不推算总收益。
+struct PortfolioSummary {
+    let amount: Double
+    let dayPnl: Double?
+    let totalPnl: Double?
+    let totalPnlPercent: Double?
+    let missingQuoteCount: Int
+    let missingCostCount: Int
+
+    init(holdings: [Holding], percents: [String: Double]) {
+        amount = holdings.reduce(0) { $0 + $1.amount }
+        missingQuoteCount = holdings.filter { percents[$0.code] == nil }.count
+        missingCostCount = holdings.filter { ($0.cost ?? 0) <= 0 }.count
+
+        guard missingQuoteCount == 0 else {
+            dayPnl = nil
+            totalPnl = nil
+            totalPnlPercent = nil
+            return
+        }
+        let pnl = holdings.compactMap { holding -> Double? in
+            guard let percent = percents[holding.code] else { return nil }
+            return Holding.dayPnl(amount: holding.amount, dayPercent: percent)
+        }.reduce(0, +)
+        dayPnl = pnl
+        guard missingCostCount == 0, !holdings.isEmpty else {
+            totalPnl = nil
+            totalPnlPercent = nil
+            return
+        }
+        let cost = holdings.compactMap(\.cost).reduce(0, +)
+        let total = amount + pnl - cost
+        totalPnl = total
+        totalPnlPercent = total / cost * 100
+    }
+}
+
 // MARK: - 涨跌提醒
 
 struct FundAlertCandidate: Equatable {
@@ -215,10 +252,10 @@ struct FundAlertCandidate: Equatable {
 }
 
 enum FundAlert {
-    /// 当日涨跌幅越过阈值(绝对值)、且今天尚未提醒过的持仓基金
+    /// 只接收调用方已验证日期与来源的当日涨跌幅，避免旧净值触发今日提醒。
     static func candidates(
         holdings: [Holding],
-        quotes: [String: FundDetail],
+        percents: [String: Double],
         threshold: Double,
         notifiedKeys: Set<String>,
         today: String
@@ -226,7 +263,7 @@ enum FundAlert {
         guard threshold > 0 else { return [] }
         var result: [FundAlertCandidate] = []
         for holding in holdings {
-            guard let percent = quotes[holding.code]?.dayChangePercent else { continue }
+            guard let percent = percents[holding.code], percent.isFinite else { continue }
             guard abs(percent) >= threshold else { continue }
             let key = notifiedKey(code: holding.code, date: today)
             guard !notifiedKeys.contains(key) else { continue }

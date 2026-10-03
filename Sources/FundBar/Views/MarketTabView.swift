@@ -3,7 +3,12 @@ import SwiftUI
 /// 大盘页签:按 A股 / 亚太 / 美股 分组展示 9 个指数,卡片化行 + 渐变涨跌胶囊
 struct MarketTabView: View {
     @ObservedObject private var store = MarketStore.shared
+    var previewIndices: [IndexQuote]? = nil
+    var previewSparklines: [String: [Double]] = [:]
+    var previewNotice: String? = nil
     @State private var pulse = false
+
+    private var indices: [IndexQuote] { previewIndices ?? store.indexQuotes }
 
     private static let regionFlags: [IndexRegion: String] = [
         .cn: "🇨🇳", .asia: "🌏", .us: "🇺🇸",
@@ -11,11 +16,11 @@ struct MarketTabView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 3) {
-                if let notice = store.marketClosedNotice {
+            VStack(alignment: .leading, spacing: 2) {
+                if let notice = previewNotice ?? store.marketClosedNotice {
                     closedNoticeBar(notice)
                 }
-                if store.indexQuotes.isEmpty {
+                if indices.isEmpty {
                     if store.isLoading {
                         ForEach(0..<9, id: \.self) { _ in
                             skeletonRow
@@ -25,27 +30,27 @@ struct MarketTabView: View {
                     }
                 }
                 ForEach(IndexRegion.allCases) { region in
-                    let quotes = store.indexQuotes.filter { $0.def.region == region }
+                    let quotes = indices.filter { $0.def.region == region }
                     if !quotes.isEmpty {
                         regionHeader(region)
                         ForEach(quotes) { quote in
                             IndexRow(
                                 quote: quote,
-                                sparkline: store.sparklines[quote.def.secid]
+                                sparkline: previewIndices == nil ? store.sparklines[quote.def.secid] : previewSparklines[quote.def.secid]
                             )
                         }
                     }
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
         }
     }
 
     /// 非交易日提示条:展示上一交易日收盘行情
     private func closedNoticeBar(_ notice: String) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: "moon.zzz.fill")
+            Image(systemName: previewIndices == nil ? "moon.zzz.fill" : "info.circle.fill")
                 .font(.system(size: 11))
             Text(notice)
                 .font(.caption)
@@ -54,7 +59,7 @@ struct MarketTabView: View {
         }
         .foregroundStyle(.orange)
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, 5)
         .background(Capsule().fill(Color.orange.opacity(0.12)))
         .padding(.bottom, 4)
     }
@@ -106,8 +111,8 @@ struct MarketTabView: View {
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
         }
-        .padding(.top, 8)
-        .padding(.bottom, 2)
+        .padding(.top, 6)
+        .padding(.bottom, 1)
         .padding(.leading, 2)
     }
 }
@@ -160,7 +165,7 @@ struct IndexRow: View {
                 changePill
             }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 3)
         .padding(.horizontal, 8)
         .background(
             RoundedRectangle(cornerRadius: 9)

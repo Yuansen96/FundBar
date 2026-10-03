@@ -44,8 +44,6 @@ final class NotificationManager {
     }
 
     static func todayString() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
+        TradingDay.string(Date())
     }
 }

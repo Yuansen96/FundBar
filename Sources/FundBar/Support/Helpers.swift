@@ -29,8 +29,8 @@ extension Double {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.maximumFractionDigits = 0
-        let text = formatter.string(from: NSNumber(value: self)) ?? String(format: "%.0f", self)
-        return "¥" + text
+        let text = formatter.string(from: NSNumber(value: abs(self))) ?? String(format: "%.0f", abs(self))
+        return (self < 0 ? "-¥" : "¥") + text
     }
 }
 

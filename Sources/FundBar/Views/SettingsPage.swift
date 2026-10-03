@@ -1,5 +1,6 @@
 import SwiftUI
 import ServiceManagement
+import AppKit
 
 /// 设置页:菜单栏显示模式、菜单栏指数(最多 3 个)、刷新间隔、关于
 struct SettingsPage: View {
@@ -71,7 +72,7 @@ struct SettingsPage: View {
                                     Text(mode.label).tag(mode.rawValue)
                                 }
                             }
-                            .onChange(of: dataSourceRaw) { _ in
+                            .onChange(of: dataSourceRaw) {
                                 store.applyDataSourceSetting()
                             }
                             Text("自动:东财优先,失败(如 IPv6 异常网络)自动切换腾讯备用源。日经225 / KOSPI 与板块榜仅东财提供。")
@@ -153,7 +154,42 @@ struct SettingsPage: View {
                                         .font(.caption2)
                                         .foregroundStyle(.tertiary)
                                 }
-                                Text("数据写入 iCloud Drive/FundBar/,同一 Apple ID 的其他 Mac 自动互相同步(新时间戳整体覆盖)。")
+                                if sync.hasConflict {
+                                    VStack(alignment: .leading, spacing: 7) {
+                                        Label("两台 Mac 的持仓或设置都有改动，同步已暂停", systemImage: "exclamationmark.triangle.fill")
+                                            .foregroundStyle(.orange)
+                                            .font(.caption)
+                                        Text("此 Mac 和 iCloud 的版本都已保存为恢复副本。选择要继续使用的版本后，可从副本补回另一份改动。")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        HStack {
+                                            Button("保留此 Mac") { sync.resolveConflictKeepingLocal() }
+                                            Button("保留 iCloud") { sync.resolveConflictKeepingRemote() }
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .disabled(!icloudSync)
+                                        if !icloudSync {
+                                            Text("请先开启 iCloud 同步，再选择要保留的版本。")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        if let folder = SyncService.recoveryFolderURL {
+                                            Button("查看恢复副本") { _ = NSWorkspace.shared.open(folder) }
+                                                .buttonStyle(.link)
+                                        }
+                                    }
+                                    .padding(8)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                                }
+                                if let issue = sync.syncIssue {
+                                    Text(issue)
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Text("数据写入 iCloud Drive/FundBar/；双机同时修改时暂停同步并保留恢复副本。")
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -202,7 +238,7 @@ struct SettingsPage: View {
                             Text("关于 FundBar")
                                 .font(.callout)
                                 .fontWeight(.medium)
-                            Text("版本 0.8.0 · SwiftUI 原生 macOS 菜单栏基金行情工具")
+                            Text("版本 0.8.4 · SwiftUI 原生 macOS 菜单栏基金行情工具")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text("数据来源:东方财富、蛋卷基金公开接口(非官方,无可用性保证)。本项目仅供学习交流,不构成任何投资建议。")
